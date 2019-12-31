@@ -8,5 +8,6 @@ export function notSignedInError(): HttpsError {
 
 export const returnStatuses = {
     OK: "successful",
-    NOTO: "non existent receiver"
+    NOTO: "non existent receiver",
+    INVALID: "other invalid state"
 }

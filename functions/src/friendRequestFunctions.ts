@@ -106,6 +106,7 @@ export const acceptFriendRequest = functions.https.onCall(
     return async () => {
         const fromSnapshot = await admin.database().ref(`userSnippets/${data.to}`).once('value');
         const toSnapshot = await admin.database().ref(`userSnippets/${data.to}`).once('value');
+        const inboxSnapshot = await admin.database().ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
 
         const updates = {} as any;
         const response = {} as any
@@ -115,6 +116,9 @@ export const acceptFriendRequest = functions.https.onCall(
         //If the desintation doesn't exist, then let's just erase this friend request
         if (!toSnapshot.exists()){
             response.status = standardHttpsData.returnStatuses.NOTO
+        }else if (!inboxSnapshot.exists()){ 
+            //This user is trying to accept a request that was never sent to them
+            response.status = standardHttpsData.returnStatuses.INVALID
         }else{
             updates[`/userFriendGroupings/${data.from}/all/${data.to}`] = toSnapshot.val();
             updates[`/userFriendGroupings/${data.to}/all/${data.from}`] = fromSnapshot.val();
