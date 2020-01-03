@@ -22,6 +22,7 @@ const MAX_BROADCAST_WINDOW = 2879 //48 hours - 1 minute
 const TASKS_LOCATION = 'us-central1'
 const FUNCTIONS_LOCATION = 'us-central1'
 const TASKS_QUEUE = 'broadcast-ttl'
+const serviceAccountEmail = 'the-og-lunchme@appspot.gserviceaccount.com';
 
 const standardChecks = (
     data: ActiveBroadcast, 
@@ -74,6 +75,9 @@ export const createActiveBroadcast = functions.https.onCall(
             httpRequest: {
               httpMethod: 'POST',
               url: deletionFuncUrl,
+              oidcToken: {
+                serviceAccountEmail,
+              },          
               //Encoding to base64 is required by the Cloud Tasks API. 
               body: Buffer.from(JSON.stringify(payload)).toString('base64'),
               headers: {
