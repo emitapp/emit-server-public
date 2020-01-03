@@ -50,7 +50,7 @@ export const sendFriendRequest = functions.https.onCall(
         return {status: standardHttpsData.returnStatuses.NOTO}
     }else{
         const updates = {} as any;
-        const timestamp = admin.database.ServerValue.TIMESTAMP
+        const timestamp = Date.now()
         updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
         updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
         await admin.database().ref().update(updates);
