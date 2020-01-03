@@ -3,6 +3,9 @@ import * as standardStructs from './standardStructs'
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 
+interface friendRequestCancelStruct extends standardStructs.fromToStruct {
+    fromInbox: boolean
+}
 
 const standardChecks = (
     data : standardStructs.fromToStruct, 
@@ -22,7 +25,7 @@ const standardChecks = (
     if (context.auth.uid !== data.from){
         throw new functions.https.HttpsError(
             'invalid-argument',
-            'Your auth token doens\'t match the from field provided');
+            'Your auth token doens\'t match');
     }   
 }
 
@@ -55,13 +58,12 @@ export const sendFriendRequest = functions.https.onCall(
     }
 });
 
-
 /**
  * Cancels a sent friend request
  * can be called from an outbox (ie a sender)or an inbox (ie a receiver)
  */
 export const cancelFriendRequest = functions.https.onCall(
-    async (data : standardStructs.friendRequestCancelStruct, context) => {
+    async (data : friendRequestCancelStruct, context) => {
     
     standardChecks(data, context)
 
