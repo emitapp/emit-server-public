@@ -4,6 +4,7 @@ const { CloudTasksClient } = require('@google-cloud/tasks')
 import admin = require('firebase-admin');
 
 import * as standardHttpsData from './standardHttpsData'
+import { isEmptyObject } from './standardFunctions';
 
 interface ActiveBroadcast {
     ownerUid: string,
@@ -11,6 +12,7 @@ interface ActiveBroadcast {
     note?: string,
     deathTimestamp: number,
     cancellationTaskPath?: string
+    recepients: { [key: string]: boolean; }
 }
 
 interface DeletionTaskPayload {
@@ -54,12 +56,36 @@ export const createActiveBroadcast = functions.https.onCall(
                 + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
         }
 
+        if (isEmptyObject(data.recepients)){
+            throw new functions.https.HttpsError(
+                'invalid-argument',
+                `Your broadcast has no recepients`);
+        }
+
         //Setting things up for the batch write
         const updates = {} as any;
         const newBroadcastParent = `activeBroadcasts/${data.ownerUid}`
         const newBroadcastUid = (await admin.database().ref(newBroadcastParent).push()).key
         const newBroadcastPath = newBroadcastParent + "/" + newBroadcastUid
+        const ownerSnippetSnapshot = await admin.database().ref(`userSnippets/${data.ownerUid}`).once('value');
+        if (!ownerSnippetSnapshot.exists()){
+            throw new functions.https.HttpsError(
+                "failed-precondition",
+                `Owner snapshot missing`);
+        }
+        //Making the object that will actually be in people's feeds
+        const feedBroadcastObject = {
+            owner: {uid: data.ownerUid, ...ownerSnippetSnapshot.val()},
+            deathTimestamp: data.deathTimestamp, 
+            location: data.location,
+            ...(data.note ? { note: data.note } : {})
+        }
+
         updates[newBroadcastPath] = data
+        Object.keys(data.recepients).forEach(recepientUid => {
+            updates[`feed/${recepientUid}`] = feedBroadcastObject
+        });
+        
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
         const project = JSON.parse(process.env.FIREBASE_CONFIG!).projectId

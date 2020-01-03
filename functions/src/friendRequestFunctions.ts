@@ -119,8 +119,10 @@ export const acceptFriendRequest = functions.https.onCall(
         //This user is trying to accept a request that was never sent to them
         response.status = standardHttpsData.returnStatuses.INVALID
     }else{
-        updates[`/userFriendGroupings/${data.from}/all/${data.to}`] = toSnapshot.val();
-        updates[`/userFriendGroupings/${data.to}/all/${data.from}`] = fromSnapshot.val();
+        updates[`/userFriendGroupings/${data.from}/_masterSnippets/${data.to}`] = toSnapshot.val();
+        updates[`/userFriendGroupings/${data.to}/_masterSnippets/${data.from}`] = fromSnapshot.val();
+        updates[`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`] = true;
+        updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
         response.status = standardHttpsData.returnStatuses.OK
     }
 
