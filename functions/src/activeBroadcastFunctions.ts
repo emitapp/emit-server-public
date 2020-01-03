@@ -16,7 +16,7 @@ interface ActiveBroadcast {
 }
 
 interface DeletionTaskPayload {
-    broadcastPath: string
+    paths: { [key: string]: null }
 }
 
 const MIN_BROADCAST_WINDOW = 2 //2 minutes
@@ -64,6 +64,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         //Setting things up for the batch write
         const updates = {} as any;
+        const nulledPaths = {} as any; //Needed for the deletion cloud task
         const newBroadcastParent = `activeBroadcasts/${data.ownerUid}`
         const newBroadcastUid = (await admin.database().ref(newBroadcastParent).push()).key
         const newBroadcastPath = newBroadcastParent + "/" + newBroadcastUid
@@ -82,8 +83,10 @@ export const createActiveBroadcast = functions.https.onCall(
         }
 
         updates[newBroadcastPath] = data
+        nulledPaths[newBroadcastParent] = null
         Object.keys(data.recepients).forEach(recepientUid => {
-            updates[`feed/${recepientUid}`] = feedBroadcastObject
+            updates[`feeds/${recepientUid}/${newBroadcastUid}`] = feedBroadcastObject
+            nulledPaths[`feeds/${recepientUid}/${newBroadcastUid}`] = null
         });
         
 
@@ -94,7 +97,9 @@ export const createActiveBroadcast = functions.https.onCall(
         const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, TASKS_QUEUE)
 
         const deletionFuncUrl = `https://${FUNCTIONS_LOCATION}-${project}.cloudfunctions.net/autoDeleteBroadcast`
-        const payload: DeletionTaskPayload = { broadcastPath: newBroadcastPath}
+
+
+        const payload: DeletionTaskPayload = { paths: nulledPaths}
 
         //Now making the task itself
         const task = {
@@ -132,7 +137,7 @@ export const autoDeleteBroadcast =
     functions.https.onRequest(async (req, res) => {
         const payload = req.body as DeletionTaskPayload
         try {
-            await admin.database().ref(payload.broadcastPath).remove()
+            await admin.database().ref().update(payload.paths);
             res.send(200)
         }
         catch (error) {
