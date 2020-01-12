@@ -6,8 +6,8 @@ export function notSignedInError(): HttpsError {
         'You have to be signed in to do this!');
 } 
 
-export const returnStatuses = {
-    OK: "successful",
-    NOTO: "non existent receiver",
-    INVALID: "other invalid state"
+export enum returnStatuses {
+    OK = "successful",
+    NOTO = "non existent receiver",
+    INVALID = "other invalid state"
 }

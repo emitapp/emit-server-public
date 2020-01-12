@@ -10,3 +10,10 @@ export function isEmptyObject (obj : {[key: string]: any}){
     }
     return true;
 }
+
+export function truncate(inputString : string, maxLength : number) {
+    if (inputString.length > maxLength)
+       return inputString.substring(0,maxLength) + '...';
+    else
+       return inputString;
+ };

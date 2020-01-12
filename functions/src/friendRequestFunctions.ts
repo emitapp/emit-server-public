@@ -1,14 +1,18 @@
 import * as functions from 'firebase-functions';
-import * as standardStructs from './standardStructs'
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 
-interface friendRequestCancelStruct extends standardStructs.fromToStruct {
+export interface fromToStruct {
+    from: string,
+    to: string
+}
+
+interface friendRequestCancelStruct extends fromToStruct {
     fromInbox: boolean
 }
 
 const standardChecks = (
-    data : standardStructs.fromToStruct, 
+    data : fromToStruct, 
     context : functions.https.CallableContext) => {
     // Checking that the user is authenticated.
     if (!context.auth) {
@@ -33,7 +37,7 @@ const standardChecks = (
  * Sends a friend request to another Biteup user
  */
 export const sendFriendRequest = functions.https.onCall(
-    async (data : standardStructs.fromToStruct, context) => {
+    async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
 
@@ -93,7 +97,7 @@ export const cancelFriendRequest = functions.https.onCall(
  * Accepts a friend request from another user
  */
 export const acceptFriendRequest = functions.https.onCall(
-    async (data : standardStructs.fromToStruct, context) => {
+    async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
 
