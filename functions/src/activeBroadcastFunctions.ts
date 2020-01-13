@@ -108,7 +108,7 @@ export const createActiveBroadcast = functions.https.onCall(
             autoConfirm: data.autoConfirm,
             ...(data.note ? { note: data.note } : {}),
             totalConfirmations: 0,
-            unseenResponses: 0
+            pendingResponses: 0
         }
 
         const broadcastPrivateData = {
@@ -209,9 +209,18 @@ export const setBroadcastResponse = functions.https.onCall(
             'Broadcast doesn\'t exist');
     }
 
+    const autoConfirm = 
+    (await admin.database()
+    .ref(`activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/autoConfirm`)
+    .once('value'))
+    .val()
+
     const updates : { [key: string]: responderStatuses } = {}
     const promises : Array<Promise<void>> = []
+
     const writePromise = async (key: string) => {
+        const newStatus = data.newStatuses[key]
+
         if (!broadcastRecepients[key]){
             throw new functions.https.HttpsError(
                 "failed-precondition",
@@ -223,6 +232,14 @@ export const setBroadcastResponse = functions.https.onCall(
             throw new functions.https.HttpsError(
                 'permission-denied',
                 'You don\'t have the the permission to chnage this user\'s status');
+        }
+
+        //We should also make sure that if the broadcast wasn't auto-confirm
+        //then only the broadcaster can set people to confirmed
+        if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
+            throw new functions.https.HttpsError(
+                'permission-denied',
+                'Only the owner of manual confirm broacasters can confirm repsponders');
         }
         
         const responderSnippet = (await admin.database()
@@ -236,8 +253,15 @@ export const setBroadcastResponse = functions.https.onCall(
                 `Owner snapshot missing - user has probably deleted their account`);
         } 
         
-        const newValue = {...responderSnippet, status: data.newStatuses[key]}
+        const newValue = {...responderSnippet, status: newStatus}
         updates[`activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`] = newValue
+
+        //If people are being ignored, then only signal "ignored" on thier feed
+        if (newStatus === responderStatuses.IGNORED){
+            updates[`feeds/${key}/${data.broadcastUid}/status`] = responderStatuses.PENDING
+        }else{
+            updates[`feeds/${key}/${data.broadcastUid}/status`] = newStatus        
+        }
     } 
 
     Object.keys(data.newStatuses).forEach(key => {   
@@ -256,28 +280,31 @@ export const onResponderWrite = functions.database
     const dataBefore = snapshot.before.val()
     const dataAfter = snapshot.after.val()
     const counterPath = `/activeBroadcasts/${context.params.ownerUid}/public/${context.params.broadcastUid}/totalConfirmations`
+    const pendingCounterPath = `/activeBroadcasts/${context.params.ownerUid}/public/${context.params.broadcastUid}/pendingResponses`
+
     const counterRef = admin.database().ref(counterPath)
+    const pendingCounterRef = admin.database().ref(pendingCounterPath)
 
     if (dataAfter === dataBefore) return null;
-    else{
-        //Increment the "unseen changes" counter
-        await counterRef.parent?.child("unseenResponses").transaction(count => {
+    
+    if (dataBefore === responderStatuses.CONFIRMED){
+        //Recrement count if we've lost a confirmation
+        return counterRef.transaction(count => {
+            return count - 1;
+        })
+    }else if (dataAfter === responderStatuses.CONFIRMED){
+         //Increment count if we have a new confirmation
+        return counterRef.transaction(count => {
             return count + 1;
         })
     }
 
-    //Recrement count if we've lost a confirmation
-    if (dataBefore === responderStatuses.CONFIRMED 
-        && dataAfter !== responderStatuses.CONFIRMED){
-        return counterRef.transaction(count => {
+    if (dataBefore === responderStatuses.PENDING){
+        return pendingCounterRef.transaction(count => {
             return count - 1;
         })
-    }
-
-    //Increment count if we have a new confirmation
-    if (dataBefore !== responderStatuses.CONFIRMED 
-        && dataAfter === responderStatuses.CONFIRMED){
-        return counterRef.transaction(count => {
+    }else if (dataAfter === responderStatuses.PENDING){
+        return pendingCounterRef.transaction(count => {
             return count + 1;
         })
     }
