@@ -5,3 +5,4 @@ admin.initializeApp(functions.config().firebase);
 
 export * from './friendRequestFunctions'
 export * from './activeBroadcastFunctions'
+export * from './cloudStorageFunctions'
