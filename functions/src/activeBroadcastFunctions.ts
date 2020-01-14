@@ -97,9 +97,9 @@ export const createActiveBroadcast = functions.https.onCall(
         });
 
         //Active broadcasts are split into 3 sections
-        //private data (only the server can use)
-        //public data (the owner can use)
-        //and responder data (which can be a bit large, so is separated on its own
+        //private (/private) data (only the server can use)
+        //public (/public) data (the owner can use)
+        //and responder (/responders) data (which can be a bit large, so is separated on its own
         //to be loaded only when needed)
 
         const broadcastPublicData = {
@@ -116,15 +116,11 @@ export const createActiveBroadcast = functions.https.onCall(
             recepientUids: data.recepients
         }
 
-        const broadcastResponderData = {}
-
         updates[userBroadcastSection + "/public/" + newBroadcastUid] = broadcastPublicData
         nulledPaths[userBroadcastSection + "/public/" + newBroadcastUid] = null
         updates[userBroadcastSection + "/private/" + newBroadcastUid] = broadcastPrivateData
         nulledPaths[userBroadcastSection + "/private/" + newBroadcastUid] = null
-        updates[userBroadcastSection + "/responders/" + newBroadcastUid] = broadcastResponderData
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
-
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
         const project = JSON.parse(process.env.FIREBASE_CONFIG!).projectId
@@ -215,8 +211,15 @@ export const setBroadcastResponse = functions.https.onCall(
     .once('value'))
     .val()
 
+
+    //Now that we've done all the crtitcal error checks, getting ready to process all the changes
+    //simultaneously
     const updates : { [key: string]: responderStatuses } = {}
-    const promises : Array<Promise<void>> = []
+    const responseChangePromises : Array<Promise<void>> = []
+
+    const confirmCounterRef = admin.database().ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
+    const pendingCounterRef = admin.database().ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
+    const deltas = {confirmations: 0, pending: 0}
 
     const writePromise = async (key: string) => {
         const newStatus = data.newStatuses[key]
@@ -239,9 +242,10 @@ export const setBroadcastResponse = functions.https.onCall(
         if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
             throw new functions.https.HttpsError(
                 'permission-denied',
-                'Only the owner of manual confirm broacasters can confirm repsponders');
+                'Only the owner of manual confirm broacasters can confirm responders');
         }
-        
+
+        //Now we're first going to check if this user still exists
         const responderSnippet = (await admin.database()
         .ref(`userSnippets/${key}`)
         .once('value'))
@@ -251,12 +255,30 @@ export const setBroadcastResponse = functions.https.onCall(
             throw new functions.https.HttpsError(
                 "failed-precondition",
                 `Owner snapshot missing - user has probably deleted their account`);
-        } 
-        
-        const newValue = {...responderSnippet, status: newStatus}
-        updates[`activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`] = newValue
+        }
+         
+        //Then we're going to nake note of thier change in status to change some 
+        //counters.
+        const responderSnippetPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`
+        const responderResponseSnippet = (await admin.database()
+        .ref(responderSnippetPath)
+        .once('value'))
+        .val()
 
-        //If people are being ignored, then only signal "ignored" on thier feed
+        recordResponseDeltas(
+            responderResponseSnippet ? responderResponseSnippet.status : null,
+            newStatus,
+            deltas)
+
+        //We could have also constructed this using responderResponseSnippet
+        //but I used the responderSnippet because it's a good chance to update some 
+        //things that the responder might have changed since they responded
+        //(like maybe their profile pic URL)
+        const newValue = {...responderSnippet, status: newStatus}
+        updates[responderSnippetPath] = newValue
+
+        //Also making sure this reflects on the responder's feed
+        //If people are being ignored, then only signal "pending" on thier feed
         if (newStatus === responderStatuses.IGNORED){
             updates[`feeds/${key}/${data.broadcastUid}/status`] = responderStatuses.PENDING
         }else{
@@ -265,49 +287,44 @@ export const setBroadcastResponse = functions.https.onCall(
     } 
 
     Object.keys(data.newStatuses).forEach(key => {   
-        promises.push(writePromise(key))  
+        responseChangePromises.push(writePromise(key))  
     });
 
-    await Promise.all(promises)
+
+    await Promise.all(responseChangePromises)
+    await Promise.all([
+        pendingCounterRef.transaction(count => count + deltas.pending),
+        confirmCounterRef.transaction(count => count + deltas.confirmations)
+    ])
     await admin.database().ref().update(updates);
     return {status: standardHttpsData.returnStatuses.OK}
 })
 
 
-export const onResponderWrite = functions.database
-.ref("/activeBroadcasts/{ownerUid}/responders/{broadcastUid}/{responderUid}/status")
-.onWrite(async (snapshot, context) => {
-    const dataBefore = snapshot.before.val()
-    const dataAfter = snapshot.after.val()
-    const counterPath = `/activeBroadcasts/${context.params.ownerUid}/public/${context.params.broadcastUid}/totalConfirmations`
-    const pendingCounterPath = `/activeBroadcasts/${context.params.ownerUid}/public/${context.params.broadcastUid}/pendingResponses`
+/**
+ * This is used by setBroadcastResponse to keep track of changes in responses
+ * So that it can reflect those changes in some counters
+ * @param before The status before the change
+ * @param after The status after the chance
+ * @param deltaObject The object that is accumulating these delta
+ */
+//I didn't make this a trigger becase it would cause problems
+//(it would me makign changes based off response auto-deletions as well)
+const recordResponseDeltas = (before: string, after: string, deltaObject: any) => {
 
-    const counterRef = admin.database().ref(counterPath)
-    const pendingCounterRef = admin.database().ref(pendingCounterPath)
-
-    if (dataAfter === dataBefore) return null;
+    if (before === after) return;
     
-    if (dataBefore === responderStatuses.CONFIRMED){
+    if (before === responderStatuses.CONFIRMED){
         //Recrement count if we've lost a confirmation
-        return counterRef.transaction(count => {
-            return count - 1;
-        })
-    }else if (dataAfter === responderStatuses.CONFIRMED){
+        deltaObject.confirmations--;
+    }else if (after === responderStatuses.CONFIRMED){
          //Increment count if we have a new confirmation
-        return counterRef.transaction(count => {
-            return count + 1;
-        })
+        deltaObject.confirmations++;
     }
 
-    if (dataBefore === responderStatuses.PENDING){
-        return pendingCounterRef.transaction(count => {
-            return count - 1;
-        })
-    }else if (dataAfter === responderStatuses.PENDING){
-        return pendingCounterRef.transaction(count => {
-            return count + 1;
-        })
+    if (before === responderStatuses.PENDING){
+        deltaObject.pending--;
+    }else if (after === responderStatuses.PENDING){
+        deltaObject.pending++;
     }
-
-    return null;
-})
+}
