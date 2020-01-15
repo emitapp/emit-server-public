@@ -1,3 +1,4 @@
+rules_version = '2';
 service firebase.storage {
  match /b/{bucket}/o {
    match /profilePictures {
@@ -13,14 +14,12 @@ service firebase.storage {
      // 2) Content type is an image
      // 3) File name is less than 50 characters
      // 4) The user's uid matches with the directory they're writing into
-     // 5) Noone can enter something that ends in _100x100 because that's the suffix the resizer cloud function uses
      match /{userUid} {
       match /{imageId} {
         allow write: if request.resource.size < 10 * 1024 * 1024
                       && request.resource.contentType.matches('image/.*')
                       && imageId.size() < 50
                       && request.auth.uid == userUid
-                      && !imageId.matches('.*_100x100')
       }
      }
    }
