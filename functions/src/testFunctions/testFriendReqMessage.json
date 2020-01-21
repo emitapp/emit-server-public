@@ -1,0 +1,14 @@
+{
+    "data": {
+        "type": "friend_request",
+        "title": "Bobby sent you a friend request!",
+        "receiverUid": "xyzxyzxyz"
+    },
+    "android": {
+        "priority": "NORMAL",
+        "ttl": 100000
+    },
+    "apns":{
+
+      }  
+}
