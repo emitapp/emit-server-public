@@ -1,4 +1,7 @@
 rules_version = '2';
+//Database is in complete lockdown
+//The data stored in Cloud Firestore (which is FCM token data)
+//is managed entirely by the admin ADK
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
