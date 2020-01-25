@@ -8,6 +8,7 @@ admin.initializeApp({
 });
 
 export * from './testFunctions/notificationTests'
+export * from './fcmFunctions'
 export * from './friendRequestFunctions'
 export * from './activeBroadcastFunctions'
 export * from './cloudStorageFunctions'
