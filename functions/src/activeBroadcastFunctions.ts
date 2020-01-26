@@ -5,7 +5,6 @@ import admin = require('firebase-admin');
 import * as standardHttpsData from './standardHttpsData'
 import { isEmptyObject, truncate } from './standardFunctions';
 
-const database = admin.database()
 
 interface BroadcastCreationRequest {
     ownerUid: string,
@@ -46,6 +45,8 @@ const serviceAccountEmail = 'the-og-lunchme@appspot.gserviceaccount.com';
  */
 export const createActiveBroadcast = functions.https.onCall(
     async (data: BroadcastCreationRequest, context) => {
+        const database = admin.database()
+
         // Checking that the user is authenticated.
         if (!context.auth) {
             throw standardHttpsData.notSignedInError()
@@ -167,6 +168,8 @@ export const createActiveBroadcast = functions.https.onCall(
  */
 export const autoDeleteBroadcast =
     functions.https.onRequest(async (req, res) => {
+        const database = admin.database()
+
         const payload = req.body as DeletionTaskPayload
         try {
             await database.ref().update(payload.paths);
@@ -184,6 +187,8 @@ export const autoDeleteBroadcast =
  */
 export const setBroadcastResponse = functions.https.onCall(
     async (data: BroadcastResponseChange, context) => {
+    const database = admin.database()
+
     if (!context.auth) {
         throw standardHttpsData.notSignedInError()
     } 

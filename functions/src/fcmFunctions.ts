@@ -108,7 +108,44 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
     }
 }
 
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{receiverUid}/inbox/{senderUid}')
+.onCreate(async (snapshot, context) => {
+    const message : any = {}
+    message.data = {}
+    message.data.type = 'new_friend_request'
+    message.data.title = `${snapshot.val().name} sent you a friend request!`
+    message.data.body = "Open Biteup to accept the friend request"
+    message.data.senderUid = context.params.senderUid
+    message.android = {}
+    message.android.priority = "NORMAL"
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
+})
 
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiverUid}/_masterSnippets/{newFriendUid}')
+.onCreate(async (snapshot, context) => {
+    const message : any = {}
+    message.data = {}
+    message.data.type = 'new_friend'
+    message.data.title = `${snapshot.val().name} is now your friend!`
+    message.data.newFriendUid = context.params.newFriendUid
+    message.android = {}
+    message.android.priority = "NORMAL"
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
+})
+
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
+.onCreate(async (snapshot, context) => {
+    console.log("Imagine this does something!")
+})
 
 /**
  * Creates an array of elements split into groups the length of size.
@@ -126,7 +163,7 @@ const chunkArray = (array : any[], size : number) : any[] => {
 
 /**
  * Gets the array of FCM tokens associated with any user.
- * Returns undefined if nothing is founs
+ * Returns undefined if no Firebase doc is found or if the tokens array is empty
  * @param uid The uid of the user 
  */
 const getFCMTokens = async (uid : string) : Promise<string [] | undefined> => {
@@ -134,7 +171,9 @@ const getFCMTokens = async (uid : string) : Promise<string [] | undefined> => {
     if (!document.exists){
         return undefined
     }else{
-        return document.data()?.tokens
+        const array = document.data()?.tokens
+        if (array.length === 0) return undefined
+        return array
     }
 }
 

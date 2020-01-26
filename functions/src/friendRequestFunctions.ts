@@ -2,8 +2,6 @@ import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 
-const database = admin.database()
-
 export interface fromToStruct {
     from: string,
     to: string
@@ -42,6 +40,7 @@ export const sendFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
+    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
@@ -72,6 +71,7 @@ export const cancelFriendRequest = functions.https.onCall(
     async (data : friendRequestCancelStruct, context) => {
     
     standardChecks(data, context)
+    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
@@ -102,6 +102,7 @@ export const acceptFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
+    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
