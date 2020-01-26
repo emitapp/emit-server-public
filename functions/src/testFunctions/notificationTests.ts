@@ -1,18 +1,18 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
 import * as standardHttpsData from '../standardHttpsData'
+import {sendFCMMessageToUsers} from '../fcmFunctions'
 
 //Ensure this is false in prod
 const TEST_FUNCS_ENABLED = false;
 
-const firestore = admin.firestore();
 interface TokenNotificationData {
     receiverToken: string,
     messageObject: admin.messaging.Message
 }
 
 interface UidNotificationData {
-    receiverUid: string,
+    receiverUids: string[],
     messageObject: admin.messaging.Message
 }
 
@@ -29,7 +29,6 @@ const checkIfEnabled = () => {
 export const test_sendNotificationViaToken = functions.https.onCall(
     async (data : TokenNotificationData, context) => {
     checkIfEnabled();
-
     admin.messaging().send({...data.messageObject, token: data.receiverToken})
         .then((response) => {
             // Response is a message ID string.
@@ -38,32 +37,16 @@ export const test_sendNotificationViaToken = functions.https.onCall(
         .catch((error) => {
             console.log('Error sending message:', error);
         });
-
     return {status: standardHttpsData.returnStatuses.OK} 
 });
 
 
 /**
- * Sends a notificaion to a user using their Uid
+ * Sends a notificaion to a groups of users using their uids
  */
 export const test_sendNotificationViaUid = functions.https.onCall(
     async (data : UidNotificationData, context) => {
     checkIfEnabled();
-
-    const fcmTokensRef = firestore.collection("fcmTokenData")
-    const document = await fcmTokensRef.doc(data.receiverUid).get();
-    if (!document.exists){
-        console.log("No FCM record")
-        return {status: standardHttpsData.returnStatuses.OK} 
-    }
-
-    admin.messaging().sendMulticast({...data.messageObject, tokens: document.data()?.tokens})
-        .then((response) => {
-            console.log(`Successes: ${response.successCount}, Failures: ${response.failureCount}`);
-        })
-        .catch((error) => {
-            console.log('Error sending message:', error);
-        });
-
+    await sendFCMMessageToUsers(data.receiverUids, data.messageObject)
     return {status: standardHttpsData.returnStatuses.OK} 
 });
