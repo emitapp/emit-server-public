@@ -2,6 +2,8 @@ import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 
+const database = admin.database()
+
 export interface fromToStruct {
     from: string,
     to: string
@@ -48,8 +50,8 @@ export const sendFriendRequest = functions.https.onCall(
     }
 
     //Check if the to destination exists as a user...
-    const fromSnapshot = await admin.database().ref(`userSnippets/${data.from}`).once('value');
-    const toSnapshot = await admin.database().ref(`userSnippets/${data.to}`).once('value');
+    const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
+    const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
     if (!toSnapshot.exists()){
         return {status: standardHttpsData.returnStatuses.NOTO}
     }else{
@@ -57,7 +59,7 @@ export const sendFriendRequest = functions.https.onCall(
         const timestamp = Date.now()
         updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
         updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
-        await admin.database().ref().update(updates);
+        await database.ref().update(updates);
         return {status: standardHttpsData.returnStatuses.OK}
     }
 });
@@ -87,7 +89,7 @@ export const cancelFriendRequest = functions.https.onCall(
         updates[`/friendRequests/${data.to}/inbox/${data.from}`] = null;
         updates[`/friendRequests/${data.from}/outbox/${data.to}`] = null;
     }
-    await admin.database().ref().update(updates);
+    await database.ref().update(updates);
     return {status: standardHttpsData.returnStatuses.OK}
  
 });
@@ -107,9 +109,9 @@ export const acceptFriendRequest = functions.https.onCall(
             'You cannot do this operation to yourself!');
     }
 
-    const fromSnapshot = await admin.database().ref(`userSnippets/${data.from}`).once('value');
-    const toSnapshot = await admin.database().ref(`userSnippets/${data.to}`).once('value');
-    const inboxSnapshot = await admin.database().ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
+    const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
+    const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
+    const inboxSnapshot = await database.ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
 
     const updates = {} as any;
     const response = {} as any
@@ -130,6 +132,6 @@ export const acceptFriendRequest = functions.https.onCall(
         response.status = standardHttpsData.returnStatuses.OK
     }
 
-    await admin.database().ref().update(updates);
+    await database.ref().update(updates);
     return response
 });

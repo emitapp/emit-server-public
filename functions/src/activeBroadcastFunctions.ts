@@ -2,9 +2,10 @@ import * as functions from 'firebase-functions';
 //@google-cloud/tasks doesn’t yet support import syntax at time of writing
 const { CloudTasksClient } = require('@google-cloud/tasks') 
 import admin = require('firebase-admin');
-
 import * as standardHttpsData from './standardHttpsData'
 import { isEmptyObject, truncate } from './standardFunctions';
+
+const database = admin.database()
 
 interface BroadcastCreationRequest {
     ownerUid: string,
@@ -74,9 +75,9 @@ export const createActiveBroadcast = functions.https.onCall(
         const updates = {} as any;
         const nulledPaths = {} as any; //Needed for the deletion cloud task
         const userBroadcastSection = `activeBroadcasts/${data.ownerUid}`
-        const newBroadcastUid = (await admin.database().ref(userBroadcastSection).push()).key
+        const newBroadcastUid = (await database.ref(userBroadcastSection).push()).key
         
-        const ownerSnippetSnapshot = await admin.database().ref(`userSnippets/${data.ownerUid}`).once('value');
+        const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
         if (!ownerSnippetSnapshot.exists()){
             throw new functions.https.HttpsError(
                 "failed-precondition",
@@ -157,7 +158,7 @@ export const createActiveBroadcast = functions.https.onCall(
         //And lastly, doing the batch writes
         //First giving the main broadcast it's deletion task's id
         updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
-        await admin.database().ref().update(updates);
+        await database.ref().update(updates);
         return {status: standardHttpsData.returnStatuses.OK}
 });
 
@@ -168,7 +169,7 @@ export const autoDeleteBroadcast =
     functions.https.onRequest(async (req, res) => {
         const payload = req.body as DeletionTaskPayload
         try {
-            await admin.database().ref().update(payload.paths);
+            await database.ref().update(payload.paths);
             res.send(200)
         }
         catch (error) {
@@ -194,7 +195,7 @@ export const setBroadcastResponse = functions.https.onCall(
     }
 
     const broadcastRecepients = 
-    (await admin.database()
+    (await database
     .ref(`activeBroadcasts/${data.broadcasterUid}/private/${data.broadcastUid}/recepientUids`)
     .once('value'))
     .val()
@@ -206,7 +207,7 @@ export const setBroadcastResponse = functions.https.onCall(
     }
 
     const autoConfirm = 
-    (await admin.database()
+    (await database
     .ref(`activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/autoConfirm`)
     .once('value'))
     .val()
@@ -217,8 +218,8 @@ export const setBroadcastResponse = functions.https.onCall(
     const updates : { [key: string]: responderStatuses } = {}
     const responseChangePromises : Array<Promise<void>> = []
 
-    const confirmCounterRef = admin.database().ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
-    const pendingCounterRef = admin.database().ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
+    const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
+    const pendingCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
     const deltas = {confirmations: 0, pending: 0}
 
     const writePromise = async (key: string) => {
@@ -246,7 +247,7 @@ export const setBroadcastResponse = functions.https.onCall(
         }
 
         //Now we're first going to check if this user still exists
-        const responderSnippet = (await admin.database()
+        const responderSnippet = (await database
         .ref(`userSnippets/${key}`)
         .once('value'))
         .val()
@@ -260,7 +261,7 @@ export const setBroadcastResponse = functions.https.onCall(
         //Then we're going to nake note of thier change in status to change some 
         //counters.
         const responderSnippetPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`
-        const responderResponseSnippet = (await admin.database()
+        const responderResponseSnippet = (await database
         .ref(responderSnippetPath)
         .once('value'))
         .val()
@@ -296,7 +297,7 @@ export const setBroadcastResponse = functions.https.onCall(
         pendingCounterRef.transaction(count => count + deltas.pending),
         confirmCounterRef.transaction(count => count + deltas.confirmations)
     ])
-    await admin.database().ref().update(updates);
+    await database.ref().update(updates);
     return {status: standardHttpsData.returnStatuses.OK}
 })
 
