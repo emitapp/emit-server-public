@@ -1,9 +1,12 @@
-import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 
+//This import added becase of 
+//https://github.com/firebase/firebase-functions/issues/596
+import 'firebase-functions';
+
+const firebaseConfig = JSON.parse(<string>process.env.FIREBASE_CONFIG);
 admin.initializeApp({
-    ...functions.config().firebase,
-    storageBucket: "the-og-lunchme.appspot.com",
+    ...firebaseConfig,
     credential: admin.credential.applicationDefault() //For FCM
 });
 
