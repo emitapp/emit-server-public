@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 
-//This import added becase of 
+//This import added because of 
 //https://github.com/firebase/firebase-functions/issues/596
 import 'firebase-functions';
 
@@ -15,3 +15,4 @@ export * from './fcmFunctions'
 export * from './friendRequestFunctions'
 export * from './activeBroadcastFunctions'
 export * from './cloudStorageFunctions'
+export * from './friendMaskFunctions'
