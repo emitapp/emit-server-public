@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
+import { objectDifference } from './standardFunctions';
 
 type fcmToken = string;
 type tokenDictionary = { [key: string]: string []; }
@@ -55,6 +56,74 @@ export const updateFCMTokenData = functions.https.onCall(
 });
 
 /**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{receiverUid}/inbox/{senderUid}')
+.onCreate(async (snapshot, context) => {
+    const message : any = {}
+    message.data = {}
+    message.data.type = 'new_friend_request'
+    message.data.title = `${snapshot.val().name} sent you a friend request!`
+    message.data.body = "Open Biteup to accept the friend request"
+    message.data.senderUid = context.params.senderUid
+    message.android = {}
+    message.android.priority = "NORMAL"
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
+})
+
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiverUid}/_masterSnippets/{newFriendUid}')
+.onCreate(async (snapshot, context) => {
+    const message : any = {}
+    message.data = {}
+    message.data.type = 'new_friend'
+    message.data.title = `${snapshot.val().name} is now your friend!`
+    message.data.newFriendUid = context.params.newFriendUid
+    message.android = {}
+    message.android.priority = "NORMAL"
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
+})
+
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
+.onCreate(async (snapshot, context) => {
+    console.log("Imagine this does something!")
+})
+
+/**
+ * Sends an FCM message to users when they get a new friend request
+ */
+export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/memberUids')
+.onWrite(async (snapshot, context) => {
+    if (!snapshot.after.exists()) return;
+    const newMembersUids = [] as string[]
+    if (snapshot.before.val()){
+        newMembersUids.concat([...objectDifference(snapshot.after.val(), snapshot.before.val())])
+    }else{
+        newMembersUids.concat(Object.keys(snapshot.after.val()))
+    }
+
+    const groupName = (await admin.database()
+        .ref(`/userGroups/${context.params.groupUid}/snippet/name`)
+        .once("value")).val()
+
+    const message : any = {}
+    message.data = {}
+    message.data.type = 'new_group'
+    message.data.title = `You've been added to the ${groupName} group!`
+    message.data.newGroupUid = context.params.groupUid
+    message.android = {}
+    message.android.priority = "NORMAL"
+    await sendFCMMessageToUsers(newMembersUids, message)
+})
+
+
+
+/**
  * Sends the FCM message to all the target users. Thanks to overengineering (lol),
  * it can work with any number of users.
  * @param userUids The user ids of all the target users
@@ -107,45 +176,6 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
         console.error(err)
     }
 }
-
-/**
- * Sends an FCM message to users when they get a new friend request
- */
-export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{receiverUid}/inbox/{senderUid}')
-.onCreate(async (snapshot, context) => {
-    const message : any = {}
-    message.data = {}
-    message.data.type = 'new_friend_request'
-    message.data.title = `${snapshot.val().name} sent you a friend request!`
-    message.data.body = "Open Biteup to accept the friend request"
-    message.data.senderUid = context.params.senderUid
-    message.android = {}
-    message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message)
-})
-
-/**
- * Sends an FCM message to users when they get a new friend request
- */
-export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiverUid}/_masterSnippets/{newFriendUid}')
-.onCreate(async (snapshot, context) => {
-    const message : any = {}
-    message.data = {}
-    message.data.type = 'new_friend'
-    message.data.title = `${snapshot.val().name} is now your friend!`
-    message.data.newFriendUid = context.params.newFriendUid
-    message.android = {}
-    message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message)
-})
-
-/**
- * Sends an FCM message to users when they get a new friend request
- */
-export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
-.onCreate(async (snapshot, context) => {
-    console.log("Imagine this does something!")
-})
 
 /**
  * Creates an array of elements split into groups the length of size.
