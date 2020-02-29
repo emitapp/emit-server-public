@@ -2,7 +2,6 @@ import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 import { isEmptyObject, objectDifference } from './standardFunctions';
-import { HttpsError } from 'firebase-functions/lib/providers/https';
 
 const groupRanks = {
     STANDARD: "standard",
@@ -39,7 +38,8 @@ export const createGroup = functions.https.onCall(
     
     authCheck(context)
     if (isEmptyObject(data.usersToAdd) || (data.name === "")){
-        throw new HttpsError('invalid-argument', "Empty member list or invlaid group name")
+        throw new functions.https.HttpsError(
+            'invalid-argument', "Empty member list or invlaid group name")
     }
     let groupMasterPath = `/userGroups/`
     const groupUid = database.ref(groupMasterPath).push().key
@@ -84,11 +84,11 @@ export const editGroup = functions.https.onCall(
         && !data.usersToRemove[(<any>context.auth).uid])
 
     if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
-        throw new HttpsError('invalid-argument', 'Group does not exitst');
+        throw new functions.https.HttpsError('invalid-argument', 'Group does not exitst');
     }else if (!userRank){
-        throw new HttpsError('failed-precondition', 'Not a member of this group');
+        throw new functions.https.HttpsError('failed-precondition', 'Not a member of this group');
     }else if (userRank !== groupRanks.ADMIN && isRemovingOther){
-        throw new HttpsError('permission-denied', 'Required admin privilidges');
+        throw new functions.https.HttpsError('permission-denied', 'Required admin privilidges');
     }
 
     
@@ -109,11 +109,11 @@ export const deleteGroup = functions.https.onCall(
         .once("value")).val()
 
     if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
-        throw new HttpsError('invalid-argument', 'Group does not exitst');
+        throw new functions.https.HttpsError('invalid-argument', 'Group does not exitst');
     }else if (!userRank){
-        throw new HttpsError('failed-precondition', 'Not a member of this group');
+        throw new functions.https.HttpsError('failed-precondition', 'Not a member of this group');
     }else if (userRank !== groupRanks.ADMIN){
-        throw new HttpsError('permission-denied', 'Required admin privilidges');
+        throw new functions.https.HttpsError('permission-denied', 'Required admin privilidges');
     }
 
     const currentMembers = 

@@ -87,7 +87,7 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
 })
 
 /**
- * Sends an FCM message to users when they get a new friend request
+ * Sends an FCM message to users when they get a new active broadcast in their feed
  */
 export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
 .onCreate(async (snapshot, context) => {

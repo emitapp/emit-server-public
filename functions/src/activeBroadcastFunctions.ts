@@ -5,18 +5,31 @@ import admin = require('firebase-admin');
 import * as standardHttpsData from './standardHttpsData'
 import { isEmptyObject, truncate } from './standardFunctions';
 
-
 interface BroadcastCreationRequest {
     ownerUid: string,
     location: string,
     note?: string,
     deathTimestamp: number,
     autoConfirm: boolean,
-    recepients: { [key: string]: boolean; }
+
+    allFriends: boolean,
+    friendRecepients: { [key: string]: boolean; },
+    maskRecepients: { [key: string]: boolean; },
+    groupRecepients: { [key: string]: boolean; }
 }
 
 interface DeletionTaskPayload {
     paths: { [key: string]: null }
+}
+
+interface CompleteRecepientList {
+    direct: { [key: string]: boolean; },
+    groups: {[key: string]: RecepientGroupInfo}
+}
+
+interface RecepientGroupInfo {
+    groupName: string,
+    members: { [key: string]: boolean; }
 }
 
 interface BroadcastResponseChange {
@@ -38,14 +51,14 @@ const FUNCTIONS_LOCATION = 'us-central1'
 const TASKS_QUEUE = 'broadcast-ttl'
 const serviceAccountEmail = 'the-og-lunchme@appspot.gserviceaccount.com';
 
-
+const database = admin.database()
 
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
  */
 export const createActiveBroadcast = functions.https.onCall(
     async (data: BroadcastCreationRequest, context) => {
-        const database = admin.database()
+        
 
         // Checking that the user is authenticated.
         if (!context.auth) {
@@ -66,10 +79,13 @@ export const createActiveBroadcast = functions.https.onCall(
                 + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
         }
 
-        if (isEmptyObject(data.recepients)){
+        if (!data.allFriends 
+            && isEmptyObject(data.friendRecepients) 
+            && isEmptyObject(data.maskRecepients) 
+            && isEmptyObject(data.groupRecepients)){
             throw new functions.https.HttpsError(
                 'invalid-argument',
-                `Your broadcast has no recepients`);
+                `Your broadcast has no recepients!`);
         }
 
         //Setting things up for the batch write
@@ -82,7 +98,7 @@ export const createActiveBroadcast = functions.https.onCall(
         if (!ownerSnippetSnapshot.exists()){
             throw new functions.https.HttpsError(
                 "failed-precondition",
-                `Owner snapshot missing`);
+                `Owner snapshot missing - your account isn't set up yet`);
         }
 
         //Making the object that will actually be in people's feeds
@@ -93,10 +109,21 @@ export const createActiveBroadcast = functions.https.onCall(
             ...(data.note ? { note: truncate(data.note, 50) } : {})
         }
 
-        Object.keys(data.recepients).forEach(recepientUid => {
-            updates[`feeds/${recepientUid}/${newBroadcastUid}`] = feedBroadcastObject
-            nulledPaths[`feeds/${recepientUid}/${newBroadcastUid}`] = null
-        });
+        const allRecepients = await generateRecepientObject(data, context.auth.uid)
+
+        //The way we're doing this, broadcasts sent via groups will overwrite
+        //broadcasts sent via direct uids or masks (if someone got a broadcast via both)
+        for (const friendUid in allRecepients.direct) {
+            updates[`feeds/${friendUid}/${newBroadcastUid}`] = feedBroadcastObject
+            nulledPaths[`feeds/${friendUid}/${newBroadcastUid}`] = null
+        }
+        for (const groupUid in allRecepients.groups) {
+            const groupInfo = {name: allRecepients.groups[groupUid].groupName, uid: groupUid}
+            for (const memberUid in allRecepients.groups[groupUid].members) {
+                updates[`feeds/${memberUid}/${newBroadcastUid}`] = {...feedBroadcastObject, groupInfo}
+                nulledPaths[`feeds/${memberUid}/${newBroadcastUid}`] = null
+            }
+        }
 
         //Active broadcasts are split into 3 sections
         //private (/private) data (only the server can use)
@@ -115,7 +142,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         const broadcastPrivateData = {
             cancellationTaskPath: "",
-            recepientUids: data.recepients
+            recepientUids: allRecepients
         }
 
         updates[userBroadcastSection + "/public/" + newBroadcastUid] = broadcastPublicData
@@ -168,7 +195,6 @@ export const createActiveBroadcast = functions.https.onCall(
  */
 export const autoDeleteBroadcast =
     functions.https.onRequest(async (req, res) => {
-        const database = admin.database()
 
         const payload = req.body as DeletionTaskPayload
         try {
@@ -187,7 +213,6 @@ export const autoDeleteBroadcast =
  */
 export const setBroadcastResponse = functions.https.onCall(
     async (data: BroadcastResponseChange, context) => {
-    const database = admin.database()
 
     if (!context.auth) {
         throw standardHttpsData.notSignedInError()
@@ -306,6 +331,72 @@ export const setBroadcastResponse = functions.https.onCall(
     return {status: standardHttpsData.returnStatuses.OK}
 })
 
+const generateRecepientObject = 
+    async (data : BroadcastCreationRequest, userUid : string) : Promise<CompleteRecepientList> => {
+
+    let allFriends = {} as { [key: string]: boolean; }
+    const allRecepients = {direct: {}, groups: {}} as CompleteRecepientList
+
+    const maskRetrievalPromise = async (maskUid : string) => {
+        const maskMembers = 
+        (await database.ref(`/userFriendGroupings/${userUid}/custom/details/${maskUid}/memberUids`)
+            .once("value")).val()
+        
+        //Don't throw an error if there are no members, since a user is allowed
+        //to have empty masks
+        allRecepients.direct = {...maskMembers, ...allRecepients.direct}
+    }
+
+    const groupRetrievalPromise = async (groupUid : string) => {
+        const groupName = 
+        (await database.ref(`userGroupMemberships/${userUid}/${groupUid}/name`)
+            .once("value")).val()
+        if (!groupName){
+            throw new functions.https.HttpsError(
+                "failed-precondition", "You're not a member of one of these groups")
+        }
+
+        const members = 
+        (await database.ref(`/userGroups/${groupUid}/memberUids`)
+            .once("value")).val()
+        delete members[userUid] //So the sender does't get sent his own broadcast
+
+        allRecepients.groups[groupUid] = {groupName, members}
+    }
+
+    const friendRetrievalPromise = async () => {
+        allFriends = 
+        (await database.ref(`/userFriendGroupings/${userUid}/_masterUIDs`)
+            .once("value")).val()
+    }
+
+    const retrievalPromises : Array<Promise<void>> = []
+    retrievalPromises.push(friendRetrievalPromise())
+    //If the user has opted to use all friends, there's no use in using the provided
+    //recepient masks
+    if (!data.allFriends){
+        for (const maskUid in data.maskRecepients) {
+            retrievalPromises.push(maskRetrievalPromise(maskUid))
+        }
+    }
+    for (const groupUid in data.groupRecepients) {
+        retrievalPromises.push(groupRetrievalPromise(groupUid))
+    }
+    await Promise.all(retrievalPromises)
+    
+    //Almost everything's constructed, now I jsut have to manually
+    //make sure that all of the manually included friend uids are part of 
+    //the retrieved complete list of friend uids (if applicable)
+    if (data.allFriends){
+        allRecepients.direct = allFriends
+    }else{
+        for (const friendUid in data.friendRecepients) {
+            if (allFriends[friendUid]) allRecepients.direct[friendUid] = true
+            else throw new functions.https.HttpsError("failed-precondition", "Non-friend uid provided")
+        }
+    }
+    return allRecepients;
+}
 
 /**
  * This is used by setBroadcastResponse to keep track of changes in responses
