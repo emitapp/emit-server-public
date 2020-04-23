@@ -255,7 +255,7 @@ export const setBroadcastResponse = functions.https.onCall(
     const writePromise = async (key: string) => {
         const newStatus = data.newStatuses[key]
 
-        if (!broadcastRecepients[key]){
+        if (!isRealRecepient(broadcastRecepients, key)){
             throw new functions.https.HttpsError(
                 "failed-precondition",
                 'Responder was never a recepient');
@@ -302,9 +302,9 @@ export const setBroadcastResponse = functions.https.onCall(
             deltas)
 
         //We could have also constructed this using responderResponseSnippet
-        //but I used the responderSnippet because it's a good chance to update some 
+        //but I used the responderSnippet because there's chance to update some 
         //things that the responder might have changed since they responded
-        //(like maybe their profile pic URL)
+        //(like maybe their display name).
         const newValue = {...responderSnippet, status: newStatus}
         updates[responderSnippetPath] = newValue
 
@@ -396,6 +396,18 @@ const generateRecepientObject =
         }
     }
     return allRecepients;
+}
+
+const isRealRecepient = (broadcastRecepients : CompleteRecepientList, uid : string) : boolean => {
+    //First check the direct recepients
+    if (broadcastRecepients.direct[uid]) return true;
+
+    //Now check the groups
+    if (!broadcastRecepients.groups) return false;
+    for (const group of Object.values(broadcastRecepients.groups)) {
+        if (group.members[uid]) return true
+    }
+    return false;
 }
 
 /**
