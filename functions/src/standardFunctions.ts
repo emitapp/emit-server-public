@@ -18,6 +18,15 @@ export function isEmptyObject (obj : {[key: string]: any}){
 }
 
 /**
+ * Determines is a string is only whitespace
+ * @param {string} str The stirng
+ */
+export const isOnlyWhitespace = (str: string) => {
+    return str.replace(/\s/g, '').length === 0
+}
+  
+
+/**
  * Truncates a string that surpasses a cetain max length and adds ellipses
  */
 export function truncate(inputString : string, maxLength : number) {

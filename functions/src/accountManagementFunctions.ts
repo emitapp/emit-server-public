@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
+import {isOnlyWhitespace} from './standardFunctions'
 
 const database = admin.database()
 
@@ -75,6 +76,11 @@ export const updateDisplayName = functions.https.onCall(
     if (typeof data !== "string"){
         throw new functions.https.HttpsError("invalid-argument", 
         "Arguments should be a string")
+    }
+
+    if (isOnlyWhitespace(data)){
+        throw new functions.https.HttpsError("invalid-argument", 
+        "Display name is empty or has only whitespace")
     }
 
     const normalizedDisplayName = data.normalize("NFKC")
