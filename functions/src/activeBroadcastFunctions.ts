@@ -8,11 +8,15 @@ import { isEmptyObject, truncate } from './standardFunctions';
 interface BroadcastCreationRequest {
     ownerUid: string,
     location: string,
-    note?: string,
     deathTimestamp: number,
-    autoConfirm: boolean,
+    timeStampRelative: boolean, //Eg: In 5 minutes vs at 12:35am
 
+    geolocation?: {latitude: number, longitude: number},
+    note?: string,
+
+    autoConfirm: boolean,
     allFriends: boolean,
+    maxResponders?: number,
     friendRecepients: { [key: string]: boolean; },
     maskRecepients: { [key: string]: boolean; },
     groupRecepients: { [key: string]: boolean; }
@@ -71,7 +75,13 @@ export const createActiveBroadcast = functions.https.onCall(
                 'Your auth token doens\'t match');
         }   
 
-        const lifeTime = (data.deathTimestamp - Date.now()) / (60000)
+        let lifeTime = 0; //In minutes
+        if (data.timeStampRelative){
+            lifeTime = data.deathTimestamp / 60000
+            data.deathTimestamp += Date.now() //Now making it absolute
+        }else{
+            lifeTime = (data.deathTimestamp - Date.now()) / (60000)
+        }
         if (isNaN(lifeTime) || lifeTime > MAX_BROADCAST_WINDOW || lifeTime < MIN_BROADCAST_WINDOW){
             throw new functions.https.HttpsError(
                 'invalid-argument',
@@ -102,12 +112,13 @@ export const createActiveBroadcast = functions.https.onCall(
         }
 
         //Making the object that will actually be in people's feeds
-        const feedBroadcastObject = {
+        const feedBroadcastObject : any = {
             owner: {uid: data.ownerUid, ...ownerSnippetSnapshot.val()},
             deathTimestamp: data.deathTimestamp, 
             location: data.location,
             ...(data.note ? { note: truncate(data.note, 50) } : {})
         }
+        if (data.geolocation) feedBroadcastObject.geolocation = data.geolocation
 
         const allRecepients = await generateRecepientObject(data, context.auth.uid)
 
@@ -126,14 +137,15 @@ export const createActiveBroadcast = functions.https.onCall(
         }
 
         //Active broadcasts are split into 3 sections
-        //private (/private) data (only the server can use)
-        //public (/public) data (the owner can use)
-        //and responder (/responders) data (which can be a bit large, so is separated on its own
-        //to be loaded only when needed)
+        //private (/private) data (only the server can user read and write)
+        //public (/public) data (the owner can write, everyone can read)
+        //and responder (/responders) data (which can be a bit large, which is 
+        //why it is its own section to be loaded only when needed)
 
         const broadcastPublicData = {
             deathTimestamp: data.deathTimestamp, 
             location: data.location,
+            ...(data.geolocation ? { geolocation: data.geolocation } : {}),
             autoConfirm: data.autoConfirm,
             ...(data.note ? { note: data.note } : {}),
             totalConfirmations: 0,
@@ -149,6 +161,7 @@ export const createActiveBroadcast = functions.https.onCall(
         nulledPaths[userBroadcastSection + "/public/" + newBroadcastUid] = null
         updates[userBroadcastSection + "/private/" + newBroadcastUid] = broadcastPrivateData
         nulledPaths[userBroadcastSection + "/private/" + newBroadcastUid] = null
+        //responders section starts off empty
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
@@ -199,7 +212,7 @@ export const autoDeleteBroadcast =
         const payload = req.body as DeletionTaskPayload
         try {
             await database.ref().update(payload.paths);
-            res.send(200)
+            res.sendStatus(200)
         }
         catch (error) {
             console.error(error)
