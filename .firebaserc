@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "the-og-lunchme"
+    "dev": "biteup-development",
+    "production": "the-og-lunchme"
   }
 }

@@ -1,18 +1,22 @@
 {
   "functions": {
     "predeploy": [
+      "sh deploy-confirmation.sh",
       "npm --prefix \"$RESOURCE_DIR\" run lint",
       "npm --prefix \"$RESOURCE_DIR\" run build"
     ],
     "source": "functions"
   },
   "database": {
+    "predeploy": ["sh deploy-confirmation.sh"],
     "rules": "database.rules.json"
   },
   "storage": {
+    "predeploy": ["sh deploy-confirmation.sh"],
     "rules": "storage.rules"
   },
   "firestore": {
+    "predeploy": ["sh deploy-confirmation.sh"],
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   }
