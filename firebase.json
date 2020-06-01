@@ -2,6 +2,7 @@
   "functions": {
     "predeploy": [
       "sh deploy-confirmation.sh",
+      "firebase functions:config:unset env && firebase functions:config:set env=\"$(cat env.json)\"",
       "npm --prefix \"$RESOURCE_DIR\" run lint",
       "npm --prefix \"$RESOURCE_DIR\" run build"
     ],

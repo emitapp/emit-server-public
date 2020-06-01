@@ -50,10 +50,10 @@ enum responderStatuses {
 
 const MIN_BROADCAST_WINDOW = 2 //2 minutes
 const MAX_BROADCAST_WINDOW = 2879 //48 hours - 1 minute
-const TASKS_LOCATION = 'us-central1'
-const FUNCTIONS_LOCATION = 'us-central1'
-const TASKS_QUEUE = 'broadcast-ttl'
-const serviceAccountEmail = 'the-og-lunchme@appspot.gserviceaccount.com';
+const TASKS_LOCATION = functions.config().env.tasks_location
+const FUNCTIONS_LOCATION = functions.config().env.functions_location
+const TASKS_QUEUE = functions.config().env.autodelete_task_queue_name
+const serviceAccountEmail = functions.config().env.broadcastCreation.service_account_email;
 
 const database = admin.database()
 

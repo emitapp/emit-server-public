@@ -1,7 +1,8 @@
 import * as admin from 'firebase-admin';
 
-//This import added because of 
-//https://github.com/firebase/firebase-functions/issues/596
+// This import added because of 
+// https://github.com/firebase/firebase-functions/issues/596
+// tslint:disable-next-line:no-import-side-effect
 import 'firebase-functions';
 
 const firebaseConfig = JSON.parse(<string>process.env.FIREBASE_CONFIG);
