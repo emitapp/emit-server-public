@@ -9,5 +9,12 @@ export function notSignedInError(): HttpsError {
 export enum returnStatuses {
     OK = "successful",
     NOTO = "non existent receiver",
-    INVALID = "other invalid state"
+    INVALID = "other invalid state",
+    LEASE_TAKEN = "lease is currently taken"
+}
+
+export enum leaseStatus {
+    AVAILABLE = "available",
+    TAKEN = "taken",
+    NONEXISTENT = 'non-existent'
 }

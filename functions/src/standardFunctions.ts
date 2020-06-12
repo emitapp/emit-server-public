@@ -46,3 +46,11 @@ export function objectDifference(objA : object, objB : object) : Set<any> {
     const setB = new Set(Object.keys(objB))
     return new Set([...setA].filter(x => !setB.has(x)))
 }
+
+/**
+ * Get s a random key from an object
+ */
+export function randomKey (obj: object) {
+    const keys = Object.keys(obj);
+    return keys[ keys.length * Math.random() << 0 ];
+};
