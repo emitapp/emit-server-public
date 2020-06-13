@@ -92,3 +92,25 @@ export const updateDisplayName = functions.https.onCall(
     await database.ref().update(updates);
     return {status: standardHttpsData.returnStatuses.OK}
 });
+
+ //Gets all the paths that point to data relating to a user
+export const getAllPaths  = functions.https.onCall(
+    async (_, context) => {
+
+    if (!context.auth) {
+        throw standardHttpsData.notSignedInError()
+    }
+
+    //FCM Tokens
+    //Inbox and Outboc of Friend Requests
+    //Broadcasts with statuses
+    //All friends have their _masterUid and _masterSnippets thingies
+    //All Broadcasts (they record  (the people who's feeds they're in)
+    //Everyone's friend groupings (2 paths each + the redireting one)
+    //All the gorups youre a part of (2 paths each)
+    //And finally your own snippet
+    //and your username
+    
+    return {status: standardHttpsData.returnStatuses.OK}
+});
+
