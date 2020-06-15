@@ -3,6 +3,13 @@ import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 import {isOnlyWhitespace} from './standardFunctions'
 
+import {getAllActiveBroadcastPaths, activeBroadcastPaths} from './activeBroadcastFunctions'
+import {getCloudStoragePaths, CloudStoragePaths} from './cloudStorageFunctions'
+import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions'
+import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
+import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
+import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'
+
 const database = admin.database()
 
 interface snippetCreationRequest{
@@ -93,24 +100,143 @@ export const updateDisplayName = functions.https.onCall(
     return {status: standardHttpsData.returnStatuses.OK}
 });
 
- //Gets all the paths that point to data relating to a user
-export const getAllPaths  = functions.https.onCall(
-    async (_, context) => {
+//Gets all the paths that point to data relating to a user
+export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer> => {
+    const allPaths = {} as any
+    const promises = [] as Array<Promise<any>>
+    promises.push((async () => {
+        const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
+        allPaths.userSnippetPath = `userSnippets/${userUid}`
+        allPaths.usernamePath = userSnippet ? `usernames/${userSnippet.usernameQuery}` : null
+    })())
+    promises.push(getAllActiveBroadcastPaths(userUid).then(paths => allPaths.activeBroadcastPaths = paths))
+    promises.push(getAllFriendshipRelatedPaths(userUid).then(paths => allPaths.friendshipPaths = paths))
+    promises.push(getAllGroupPaths(userUid).then(paths => allPaths.groupPaths = paths))
+    promises.push(getAllMaskRelatedPaths(userUid).then(paths => allPaths.maskPaths = paths))
+    promises.push(getCloudStoragePaths(userUid).then(paths => allPaths.cloudStoragePaths = paths))
+    promises.push(getFCMRelatedPaths(userUid).then(paths => allPaths.fcmRelatedPaths = paths))
+    await Promise.all(promises)
+    return allPaths as allPathsContainer
+}
 
+interface allPathsContainer {
+    userSnippetPath: string,
+    usernamePath: string,
+    activeBroadcastPaths: activeBroadcastPaths,
+    friendshipPaths: FriendshipRelatedPaths,
+    groupPaths: GroupsPaths,
+    maskPaths: MaskRelatedPaths,
+    cloudStoragePaths: CloudStoragePaths,
+    fcmRelatedPaths: FCMRelatedPaths
+}
+
+export const requestAllData = functions.https.onCall(
+    async (_, context) => {
+    
     if (!context.auth) {
         throw standardHttpsData.notSignedInError()
     }
+  
+    let username : string = "<Username not provided>"
+    let displayName: string = "<Display name not provided>"
+    let userEmail: string | undefined = ""
 
-    //FCM Tokens
-    //Inbox and Outboc of Friend Requests
-    //Broadcasts with statuses
-    //All friends have their _masterUid and _masterSnippets thingies
-    //All Broadcasts (they record  (the people who's feeds they're in)
-    //Everyone's friend groupings (2 paths each + the redireting one)
-    //All the gorups youre a part of (2 paths each)
-    //And finally your own snippet
-    //and your username
-    
+    const allPaths = await getAllPaths(context.auth.uid)
+    const userData = {} as any
+    const promises = [] as Array<Promise<any>>
+    const retrievalPromise = async (path: string) => {
+        if (!path) return;
+        let data = (await database.ref(path).once("value")).val()
+        if (data === null) data = "null"
+        userData[path] = data
+    }
+    const pushPath = (p: string) => promises.push(retrievalPromise(p))
+
+    pushPath(allPaths.activeBroadcastPaths.activeBroadcastSection)
+    allPaths.activeBroadcastPaths.broadcastResponseSnippets.forEach(path => pushPath(path));
+    allPaths.activeBroadcastPaths.broadcastsFeedPaths.forEach(path => pushPath(path))
+    pushPath(allPaths.activeBroadcastPaths.userFeed)
+
+    pushPath(allPaths.friendshipPaths.requestMailbox)
+    allPaths.friendshipPaths.friendshipSections.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.receivedFriendRequests.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.sentFriendRequests.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.snippetsInOthersFriendSections.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.uidsInOthersFriendSections.forEach(path => pushPath(path))
+
+    pushPath(allPaths.groupPaths.groupMembershipSection)
+    allPaths.groupPaths.snippetsInGroups.forEach(path => pushPath(path))
+    allPaths.groupPaths.uidsInGroups.forEach(path => pushPath(path))
+
+    allPaths.maskPaths.maskMembershipRecords.forEach(path => pushPath(path))
+    allPaths.maskPaths.maskSections.forEach(path => pushPath(path))
+    allPaths.maskPaths.snippetsInOtherMasks.forEach(path => pushPath(path))
+    allPaths.maskPaths.uidsInOtherMasks.forEach(path => pushPath(path))
+
+    pushPath(allPaths.usernamePath)
+
+    promises.push((async () => {
+        let data = (await database.ref(allPaths.userSnippetPath).once("value")).val()
+        if (data === null){
+            data = "null"
+        }else{
+            displayName = data.displayName
+            username = data.username
+        }
+        userData[allPaths.userSnippetPath] = data
+    })())
+
+    promises.push((async () => {
+        const firestore = admin.firestore();
+        const fcmTokenDoc = await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).get()
+        if (fcmTokenDoc.exists) userData[allPaths.fcmRelatedPaths.tokenDocumentPath] = fcmTokenDoc.data
+    })())
+
+    promises.push((async () => {
+        const auth = admin.auth();
+        const authRecord = await auth.getUser(<string>(context.auth?.uid))
+        userEmail = authRecord.email
+        userData["accountData"] = authRecord
+    })())
+   
+    //At the moment we dont do anything with the profile pic path
+
+    await Promise.all(promises)
+
+    if (!userEmail){
+        throw new functions.https.HttpsError("failed-precondition", "No email address linked to account")
+    }
+
+    //Now sending a the mail to the user
+    const nodemailer = await import('nodemailer');
+    const transporter = nodemailer.createTransport({
+        host: functions.config().env.userDataEmailing.email_host,
+        port: parseInt(functions.config().env.userDataEmailing.email_port),
+        secure: functions.config().env.userDataEmailing.use_tls === "true", // true for port 465, usually false for other ports
+        auth: {
+               user: functions.config().env.userDataEmailing.email_address,
+               pass: functions.config().env.userDataEmailing.email_password
+           }
+    });
+
+    let mailMessage = `<p><strong>Heya ${displayName}!&nbsp;👋👋🏾</strong></p>\n`
+    mailMessage += '<p>Looks like you requested for all the personal data that Biteup has related to you.</p>\n'
+    mailMessage += "<p>You'll find it attached to this email as a JSON file.</p>\n"
+    mailMessage += '<p>Ciao!</p>\n\n'
+    mailMessage += "<p>P.S: Don't reply to this email address - it's never checked. It's only used by our servers to send user data upon request.</p>"
+    const mailOptions = {
+        from: functions.config().env.userDataEmailing.email_address, 
+        to: userEmail, 
+        subject: `Your Biteup user data (@${username})`, 
+        html: mailMessage,
+        attachments: [
+            {
+                filename: 'biteup_user_data.json',
+                content: JSON.stringify(userData)
+            }
+        ]
+    };
+
+    await transporter.sendMail(mailOptions)
     return {status: standardHttpsData.returnStatuses.OK}
 });
-

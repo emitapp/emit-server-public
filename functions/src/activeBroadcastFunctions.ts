@@ -450,3 +450,50 @@ const recordResponseDeltas = (before: string, after: string, deltaObject: any) =
         deltaObject.pending++;
     }
 }
+
+//Gets paths to all the active braodcast data related to the user
+export interface activeBroadcastPaths {
+    userFeed : string,
+    broadcastResponseSnippets: Array<string>,
+    activeBroadcastSection: string,
+    broadcastsFeedPaths: Array<string>,
+}
+
+export const getAllActiveBroadcastPaths = async (userUid : string) : Promise<activeBroadcastPaths> => {
+    const paths : activeBroadcastPaths = {
+        userFeed : "",
+        broadcastResponseSnippets: [],
+        activeBroadcastSection: "string",
+        broadcastsFeedPaths: [],
+    }
+    // 1) Path to your feed
+    paths.userFeed = `feeds/${userUid}`
+
+    // 2) Paths to everyone who has your snippet in their active broadcasts sections
+    const completeFeed = (await database.ref(`feeds/${userUid}`).once("value")).val()
+    for (const broadcastUid in completeFeed) {
+        const broadcast = completeFeed[broadcastUid]
+        if (!broadcast.status) continue
+        const broadcasterUid = broadcast.owner.uid
+        paths.broadcastResponseSnippets.push(`activeBroadcasts/${broadcasterUid}/responders/${broadcastUid}/${userUid}`) 
+    } 
+
+    // 3) Path to your active broadcast section
+    paths.activeBroadcastSection = `activeBroadcasts/${userUid}`
+
+    // 4) Paths to all your broadcasts in people's feeds
+    const allBroadcastRecepientLists = (await database.ref(`activeBroadcasts/${userUid}/private`).once("value")).val()
+    for (const broadcastUid in allBroadcastRecepientLists) {
+        const recepeintList : CompleteRecepientList = allBroadcastRecepientLists[broadcastUid].recepientUids
+        for (const directReceientUid in recepeintList.direct) {
+            paths.broadcastsFeedPaths.push(`feeds/${directReceientUid}/${broadcastUid}`)
+        }
+        for (const groupUid in recepeintList.groups) {
+            const groupMembers = recepeintList.groups[groupUid].members
+            for (const memberUid in groupMembers){
+                paths.broadcastsFeedPaths.push(`feeds/${memberUid}/${broadcastUid}`)
+            }
+        }
+    } 
+    return paths
+}

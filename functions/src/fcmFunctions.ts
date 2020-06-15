@@ -221,3 +221,12 @@ const findUidForToken = (token : fcmToken, tokenDic : tokenDictionary) : string 
     }
     return foundUid;
 }
+
+export interface FCMRelatedPaths {
+    tokenDocumentPath : string,
+}
+
+export const getFCMRelatedPaths = async (userUid : string) : Promise<FCMRelatedPaths> => {
+    const paths : FCMRelatedPaths = {tokenDocumentPath : `fcmTokenData/${userUid}`}
+    return paths
+}

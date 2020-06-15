@@ -98,4 +98,46 @@ export const updateMaskMemberCount = functions.database.ref('/userFriendGrouping
     }else{
       await snippetRef.child("memberCount").set(Object.keys(newValue).length)
     }
-  });
+});
+
+export interface MaskRelatedPaths {
+  maskSections : Array<string>,
+  snippetsInOtherMasks: Array<string>,
+  uidsInOtherMasks: Array<string>,
+  maskMembershipRecords: Array<string>
+}
+
+export const getAllMaskRelatedPaths = async (userUid : string) : Promise<MaskRelatedPaths> => {
+  const paths : MaskRelatedPaths = {
+      maskSections : [],
+      snippetsInOtherMasks: [],
+      uidsInOtherMasks: [],
+      maskMembershipRecords: []
+  }
+  // 1) Getting the paths for the masks you manage
+  paths.maskSections.push(`/userFriendGroupings/${userUid}/_friendMaskMemberships`)
+  paths.maskSections.push(`/userFriendGroupings/${userUid}/custom`)
+
+  // 2) Paths pointing to information about you in other masks
+  //First, get all yout friends uids...
+  const getMaskPaths = async (friendUid:string) => {
+    const membershipListSnapshot = 
+      await database.ref(`/userFriendGroupings/${friendUid}/_friendMaskMemberships/${userUid}`)
+      .once("value")
+      if (membershipListSnapshot.exists()){
+        paths.maskMembershipRecords.push(`/userFriendGroupings/${friendUid}/_friendMaskMemberships/${userUid}`)
+        for (const maskUid in membershipListSnapshot.val()) {
+          paths.snippetsInOtherMasks.push(`/userFriendGroupings/${friendUid}/custom/details/${maskUid}/memberSnippets/${userUid}`)
+          paths.snippetsInOtherMasks.push(`/userFriendGroupings/${friendUid}/custom/details/${maskUid}/memberUids/${userUid}`)
+        }
+      }
+  }
+
+  const allFriendsUids = (await database.ref(`/userFriendGroupings/${userUid}/_masterUIDs`).once("value")).val()
+  const pathRetrievalPaths = []
+  for (const friendUid in allFriendsUids) {
+    pathRetrievalPaths.push(getMaskPaths(friendUid))
+  }
+  await Promise.all(pathRetrievalPaths)
+  return paths
+}

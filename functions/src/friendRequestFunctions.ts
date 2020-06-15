@@ -2,6 +2,8 @@ import * as functions from 'firebase-functions';
 import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
 
+const database = admin.database()
+
 export interface fromToStruct {
     from: string,
     to: string
@@ -40,7 +42,6 @@ export const sendFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
-    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
@@ -71,7 +72,6 @@ export const cancelFriendRequest = functions.https.onCall(
     async (data : friendRequestCancelStruct, context) => {
     
     standardChecks(data, context)
-    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
@@ -102,7 +102,6 @@ export const acceptFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
     
     standardChecks(data, context)
-    const database = admin.database()
 
     if (!context.auth || context.auth.uid === data.to){
         throw new functions.https.HttpsError(
@@ -136,3 +135,47 @@ export const acceptFriendRequest = functions.https.onCall(
     await database.ref().update(updates);
     return response
 });
+
+export interface FriendshipRelatedPaths {
+    friendshipSections : Array<string>,
+    snippetsInOthersFriendSections: Array<string>,
+    uidsInOthersFriendSections: Array<string>,
+    requestMailbox: string //Your inbox and outbox location
+    sentFriendRequests: Array<string>, //Your requests in other people's inboxes
+    receivedFriendRequests: Array<string> //The friend requests sent to you from (pointing to others outboxes)
+}
+   //Used for friendship requests and friendship snippets only. NO data realted to masks
+  export const getAllFriendshipRelatedPaths = async (userUid : string) : Promise<FriendshipRelatedPaths> => {
+    const paths : FriendshipRelatedPaths = {
+        friendshipSections : [],
+        requestMailbox: "",
+        snippetsInOthersFriendSections: [],
+        sentFriendRequests: [],
+        receivedFriendRequests: [],
+        uidsInOthersFriendSections: []
+    }
+    // 1) Getting the paths that contain information you manage on you frinds
+    paths.friendshipSections.push(`/userFriendGroupings/${userUid}/_masterUIDs`)
+    paths.friendshipSections.push(`/userFriendGroupings/${userUid}/_masterSnippets`)
+
+    // 2) Doing something similar for friendRequests
+    paths.requestMailbox = `/friendRequests/${userUid}`
+
+    // 3) Getting copies of friend requests in peoples inboxes and outboxes...
+    const allInboxRequests = (await database.ref(`/friendRequests/${userUid}/inbox`).once("value")).val
+    const allOutboxRequests = (await database.ref(`/friendRequests/${userUid}/outbox`).once("value")).val
+    for (const senderUid in allInboxRequests) {
+        paths.receivedFriendRequests.push(`/friendRequests/${senderUid}/outbox/${userUid}`)
+    }
+    for (const receiverUid in allOutboxRequests) {
+        paths.sentFriendRequests.push(`/friendRequests/${receiverUid}/inbox/${userUid}`)
+    }
+  
+    // 4) Getting the paths that point to your information in other people's friendship sections
+    const allFriendsUids = (await database.ref(`/userFriendGroupings/${userUid}/_masterUIDs`).once("value")).val()
+    for (const friendUid in allFriendsUids) {
+        paths.uidsInOthersFriendSections.push(`/userFriendGroupings/${friendUid}/_masterUIDs/${userUid}`)
+        paths.snippetsInOthersFriendSections.push(`/userFriendGroupings/${friendUid}/_masterSnippets/${userUid}`)
+    }
+    return paths
+  }

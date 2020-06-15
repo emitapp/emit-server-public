@@ -313,3 +313,24 @@ const updateGroupName = async (data : groupEditRequest) => {
     updates[`/userGroups/${data.groupUid}/memberUids`] = {name: data.newName}
     return updates
 }
+
+export interface GroupsPaths {
+    groupMembershipSection : string,
+    snippetsInGroups: Array<string>,
+    uidsInGroups: Array<string>
+}
+
+export const getAllGroupPaths = async (userUid : string) : Promise<GroupsPaths> => {
+    const paths : GroupsPaths =  {
+        groupMembershipSection : "",
+        snippetsInGroups: [],
+        uidsInGroups: []
+    }
+    paths.groupMembershipSection = `userGroupMemberships/${userUid}`
+    const allGroups = (await database.ref(`userGroupMemberships/${userUid}`).once("value")).val()
+    for (const groupUid in allGroups) {
+        paths.uidsInGroups.push(`/userGroups/${groupUid}/memberUids/${userUid}`)
+        paths.snippetsInGroups.push(`/userGroups/${groupUid}/memberSnippets/${userUid}`)
+    }
+    return paths
+}

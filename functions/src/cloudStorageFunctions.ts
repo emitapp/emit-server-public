@@ -21,3 +21,11 @@ export const deleteOlderProfilePic = functions.storage.object().onFinalize(async
     });
     await Promise.all(deletionPromises)
 });
+
+export interface CloudStoragePaths {
+    profilePictureDirectory : string,
+}
+export const getCloudStoragePaths = async (userUid : string) : Promise<CloudStoragePaths> => {
+    const paths : CloudStoragePaths = {profilePictureDirectory : `profilePictures/${userUid}`}
+    return paths
+}
