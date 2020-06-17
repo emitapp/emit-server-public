@@ -136,6 +136,46 @@ export const acceptFriendRequest = functions.https.onCall(
     return response
 });
 
+export const removeFriend = functions.https.onCall(
+    async (data : fromToStruct, context) => {
+    
+    standardChecks(data, context)
+    const updates = {} as any;
+    const response = {} as any
+
+    if (!context.auth || context.auth.uid === data.to){
+        response.status = standardHttpsData.returnStatuses.INVALID
+        return status
+    }
+
+    const friendExists = (await database.ref(`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`)
+        .once("value")).exists()
+    if (!friendExists){
+        response.status = standardHttpsData.returnStatuses.NOTO
+        return status
+    }
+
+    //First, get all yout friends uids...
+    const addAllRelevantPaths = async (friendA:string, friendB:string) => {
+        updates[`/userFriendGroupings/${friendA}/_masterUIDs/${friendB}`] = null
+        updates[`/userFriendGroupings/${friendA}/_masterSnippets/${friendB}`] = null
+        const membershipListSnapshot = await database.ref(`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`)
+            .once("value")
+        if (membershipListSnapshot.exists()){
+            updates[`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`] = null
+            for (const maskUid in membershipListSnapshot.val()) {
+                updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberSnippets/${friendB}`] = null
+                updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberUids/${friendB}`] = null
+            }
+        }
+    } 
+
+    await Promise.all([addAllRelevantPaths(data.from, data.to), addAllRelevantPaths(data.to, data.from)])
+    await database.ref().update(updates);
+    response.status = standardHttpsData.returnStatuses.OK
+    return response
+});
+
 export interface FriendshipRelatedPaths {
     friendshipSections : Array<string>,
     snippetsInOthersFriendSections: Array<string>,
