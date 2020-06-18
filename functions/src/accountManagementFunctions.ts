@@ -104,6 +104,8 @@ export const updateDisplayName = functions.https.onCall(
 export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer> => {
     const allPaths = {} as any
     const promises = [] as Array<Promise<any>>
+    allPaths.savedLocationsPath = `savedLocations/${userUid}`
+    allPaths.userSnippetExtrasPath = `userSnippetExtras/${userUid}`
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
         allPaths.userSnippetPath = `userSnippets/${userUid}`
@@ -122,12 +124,14 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
 interface allPathsContainer {
     userSnippetPath: string,
     usernamePath: string,
+    savedLocationsPath: string,
+    userSnippetExtrasPath: string,
     activeBroadcastPaths: activeBroadcastPaths,
     friendshipPaths: FriendshipRelatedPaths,
     groupPaths: GroupsPaths,
     maskPaths: MaskRelatedPaths,
     cloudStoragePaths: CloudStoragePaths,
-    fcmRelatedPaths: FCMRelatedPaths
+    fcmRelatedPaths: FCMRelatedPaths,
 }
 
 export const requestAllData = functions.https.onCall(
@@ -174,6 +178,8 @@ export const requestAllData = functions.https.onCall(
     allPaths.maskPaths.uidsInOtherMasks.forEach(path => pushPath(path))
 
     pushPath(allPaths.usernamePath)
+    pushPath(allPaths.savedLocationsPath)
+    pushPath(allPaths.userSnippetExtrasPath)
 
     promises.push((async () => {
         let data = (await database.ref(allPaths.userSnippetPath).once("value")).val()
@@ -239,4 +245,54 @@ export const requestAllData = functions.https.onCall(
 
     await transporter.sendMail(mailOptions)
     return {status: standardHttpsData.returnStatuses.OK}
+});
+
+export const deleteUserData = functions.auth.user().onDelete(async (user) => {
+    const allPaths = await getAllPaths(user.uid)
+    const updates = {} as any
+    const promises = [] as Array<Promise<any>>
+    const addToDeletionList = async (path: string) => {
+        if (!path) return;
+        updates[path] = null
+    }
+    const pushPath = (p: string) => promises.push(addToDeletionList(p))
+
+    pushPath(allPaths.activeBroadcastPaths.activeBroadcastSection)
+    allPaths.activeBroadcastPaths.broadcastResponseSnippets.forEach(path => pushPath(path));
+    allPaths.activeBroadcastPaths.broadcastsFeedPaths.forEach(path => pushPath(path))
+    pushPath(allPaths.activeBroadcastPaths.userFeed)
+
+    pushPath(allPaths.friendshipPaths.requestMailbox)
+    allPaths.friendshipPaths.friendshipSections.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.receivedFriendRequests.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.sentFriendRequests.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.snippetsInOthersFriendSections.forEach(path => pushPath(path))
+    allPaths.friendshipPaths.uidsInOthersFriendSections.forEach(path => pushPath(path))
+
+    pushPath(allPaths.groupPaths.groupMembershipSection)
+    allPaths.groupPaths.snippetsInGroups.forEach(path => pushPath(path))
+    allPaths.groupPaths.uidsInGroups.forEach(path => pushPath(path))
+
+    allPaths.maskPaths.maskMembershipRecords.forEach(path => pushPath(path))
+    allPaths.maskPaths.maskSections.forEach(path => pushPath(path))
+    allPaths.maskPaths.snippetsInOtherMasks.forEach(path => pushPath(path))
+    allPaths.maskPaths.uidsInOtherMasks.forEach(path => pushPath(path))
+
+    pushPath(allPaths.usernamePath)
+    pushPath(allPaths.savedLocationsPath)
+    pushPath(allPaths.userSnippetExtrasPath)
+    pushPath(allPaths.userSnippetPath)
+
+    promises.push((async () => {
+        const firestore = admin.firestore();
+        await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete()
+    })())
+   
+    promises.push((async () => {
+        const bucket = admin.storage().bucket();
+        await bucket.deleteFiles({prefix: allPaths.cloudStoragePaths.profilePictureDirectory})
+    })())
+
+    await Promise.all(promises)
+    await database.ref().update(updates);
 });
