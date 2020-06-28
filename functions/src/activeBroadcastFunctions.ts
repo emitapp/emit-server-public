@@ -92,6 +92,11 @@ export const createActiveBroadcast = functions.https.onCall(
                 + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
         }
 
+        if (data.maxResponders && !Number.isInteger(data.maxResponders)){
+            throw new functions.https.HttpsError(
+                'invalid-argument', "Invalid responder cap");
+        }
+
         if (!data.allFriends 
             && isEmptyObject(data.friendRecepients) 
             && isEmptyObject(data.maskRecepients) 
@@ -152,7 +157,7 @@ export const createActiveBroadcast = functions.https.onCall(
         }
 
         //Active broadcasts are split into 3 sections
-        //private (/private) data (only the server can user read and write)
+        //private (/private) data (only the server should really read and write)
         //public (/public) data (the owner can write, everyone can read)
         //and responder (/responders) data (which can be a bit large, which is 
         //why it is its own section to be loaded only when needed)
@@ -169,7 +174,9 @@ export const createActiveBroadcast = functions.https.onCall(
 
         const broadcastPrivateData = {
             cancellationTaskPath: "",
-            recepientUids: allRecepients
+            recepientUids: allRecepients,
+            totalResponses: 0,
+            responseCap: data.maxResponders || null
         }
 
         updates[userBroadcastSection + "/public/" + newBroadcastUid] = broadcastPublicData
@@ -293,7 +300,7 @@ export const setBroadcastResponse = functions.https.onCall(
             || (context.auth.uid !== data.broadcasterUid && context.auth.uid !== key)){
             throw new functions.https.HttpsError(
                 'permission-denied',
-                'You don\'t have the the permission to chnage this user\'s status');
+                'You don\'t have the the permission to change this user\'s status');
         }
 
         //We should also make sure that if the broadcast wasn't auto-confirm
@@ -301,7 +308,7 @@ export const setBroadcastResponse = functions.https.onCall(
         if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
             throw new functions.https.HttpsError(
                 'permission-denied',
-                'Only the owner of manual confirm broacasters can confirm responders');
+                'Only the owner of manual confirm broacasts can confirm responders');
         }
 
         //Now we're first going to check if this user still exists
@@ -357,6 +364,46 @@ export const setBroadcastResponse = functions.https.onCall(
     ])
     await database.ref().update(updates);
     return {status: standardHttpsData.returnStatuses.OK}
+})
+
+export const lockBroadcastIfNeeded = functions.database.ref('activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid}')
+.onCreate(async (_, context) => {
+
+    const {broadcasterUid, broadcastUid, newResponderUid} = context.params
+    const updates = {} as any
+    updates[`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids/${newResponderUid}`] = true
+
+    const totalResponseCountRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/totalResponses`)
+    let totalCount = 0
+    await totalResponseCountRef.transaction(count => {
+        totalCount = count + 1
+        return totalCount
+    });
+
+    const responseCapRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responseCap`)
+    const responseCap = (await responseCapRef.once("value")).val()
+
+    if (responseCap && totalCount >= responseCap){ //Time to lock down the broadcast. Delete it from every non-responder's feed
+        const responderUidsRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids`)
+        const responderUids = {...(await responderUidsRef.once("value")).val()}
+        responderUids[newResponderUid] = true //Adding this new responder to the calulcation (since he isn't in the server's record yet)
+        const broadcastRecepients : CompleteRecepientList = (await database
+            .ref(`activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/recepientUids`)
+            .once('value'))
+            .val()
+
+        for (const uid of Object.keys(broadcastRecepients.direct || {})) {
+            if (!responderUids[uid]) updates[`feeds/${uid}/${broadcastUid}`] = null
+        }
+        for (const group of Object.values(broadcastRecepients.groups || {})) {
+            for (const uid of Object.keys(group.members)) {
+                if (!responderUids[uid]) updates[`feeds/${uid}/${broadcastUid}`] = null
+            }
+        }
+        updates[`/activeBroadcasts/${broadcasterUid}/public/${broadcastUid}/locked`] = true
+    }
+
+    await database.ref().update(updates);
 })
 
 const generateRecepientObject = 
@@ -470,6 +517,7 @@ const recordResponseDeltas = (before: string, after: string, deltaObject: any) =
 export interface activeBroadcastPaths {
     userFeed : string,
     broadcastResponseSnippets: Array<string>,
+    broadcastResponseUids: Array<string>,
     activeBroadcastSection: string,
     broadcastsFeedPaths: Array<string>,
 }
@@ -478,6 +526,7 @@ export const getAllActiveBroadcastPaths = async (userUid : string) : Promise<act
     const paths : activeBroadcastPaths = {
         userFeed : "",
         broadcastResponseSnippets: [],
+        broadcastResponseUids: [],
         activeBroadcastSection: "string",
         broadcastsFeedPaths: [],
     }
@@ -491,6 +540,7 @@ export const getAllActiveBroadcastPaths = async (userUid : string) : Promise<act
         if (!broadcast.status) continue
         const broadcasterUid = broadcast.owner.uid
         paths.broadcastResponseSnippets.push(`activeBroadcasts/${broadcasterUid}/responders/${broadcastUid}/${userUid}`) 
+        paths.broadcastResponseUids.push(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids/${userUid}`)
     } 
 
     // 3) Path to your active broadcast section

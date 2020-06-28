@@ -176,6 +176,7 @@ export const requestAllData = functions.https.onCall(
 
     pushPath(allPaths.activeBroadcastPaths.activeBroadcastSection)
     allPaths.activeBroadcastPaths.broadcastResponseSnippets.forEach(path => pushPath(path));
+    allPaths.activeBroadcastPaths.broadcastResponseUids.forEach(path => pushPath(path));
     allPaths.activeBroadcastPaths.broadcastsFeedPaths.forEach(path => pushPath(path))
     pushPath(allPaths.activeBroadcastPaths.userFeed)
 
@@ -277,6 +278,7 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
 
     pushPath(allPaths.activeBroadcastPaths.activeBroadcastSection)
     allPaths.activeBroadcastPaths.broadcastResponseSnippets.forEach(path => pushPath(path));
+    allPaths.activeBroadcastPaths.broadcastResponseUids.forEach(path => pushPath(path));
     allPaths.activeBroadcastPaths.broadcastsFeedPaths.forEach(path => pushPath(path))
     pushPath(allPaths.activeBroadcastPaths.userFeed)
 
