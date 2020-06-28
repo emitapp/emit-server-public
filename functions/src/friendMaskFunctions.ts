@@ -12,6 +12,8 @@ interface maskEditRequest {
   usersToRemove?: { [key: string]: boolean; }
 }
 
+export const MAX_MASK_NAME_LENGTH = 40
+
 export const createOrEditMask = functions.https.onCall(
   async (data : maskEditRequest, context) => {
 
@@ -19,9 +21,14 @@ export const createOrEditMask = functions.https.onCall(
       throw notSignedInError()
   }
 
-  if (!data.maskUid && (!data.newName || isOnlyWhitespace(data.newName))){
+  if (!data.maskUid && !data.newName ){
     throw new functions.https.HttpsError(
-      'invalid-argument', "No/invalid name for mask")
+      'invalid-argument', "No name for mask")
+  }
+
+  if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_MASK_NAME_LENGTH)){
+    throw new functions.https.HttpsError(
+      'invalid-argument', "Invalid name for mask")
   }
 
   const maskUid = data.maskUid || database.ref(`/userFriendGroupings/${context.auth.uid}/custom/snippets`).push().key

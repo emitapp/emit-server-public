@@ -5,6 +5,9 @@ import admin = require('firebase-admin');
 import * as standardHttpsData from './standardHttpsData'
 import { isEmptyObject, truncate } from './standardFunctions';
 
+export const MAX_LOCATION_NAME_LENGTH = 100
+export const MAX_BROADCAST_NOTE_LENGTH = 500
+
 interface BroadcastCreationRequest {
     ownerUid: string,
     location: string,
@@ -96,6 +99,18 @@ export const createActiveBroadcast = functions.https.onCall(
             throw new functions.https.HttpsError(
                 'invalid-argument',
                 `Your broadcast has no recepients!`);
+        }
+
+        if (data.note && data.note.length > MAX_BROADCAST_NOTE_LENGTH){
+            throw new functions.https.HttpsError(
+                'invalid-argument',
+                `Broadcast note too long`);
+        }
+
+        if (data.location.length > MAX_LOCATION_NAME_LENGTH){
+            throw new functions.https.HttpsError(
+                'invalid-argument',
+                `Broadcast location name too long`);
         }
 
         //Setting things up for the batch write

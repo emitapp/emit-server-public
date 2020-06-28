@@ -10,6 +10,9 @@ import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
 import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
 import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'
 
+export const MAX_USERNAME_LENGTH = 30
+export const MAX_DISPLAY_NAME_LENGTH = 35
+
 const database = admin.database()
 
 interface snippetCreationRequest{
@@ -37,6 +40,16 @@ export const createSnippet = functions.https.onCall(
     const normalizedUsername = data.username.normalize('NFKC') 
     const lowerNormalisedUsername = normalizedUsername.toLowerCase()
     const lowerNormalisedDisplayName= normalizedDisplayName.toLowerCase()
+
+    if (isOnlyWhitespace(normalizedDisplayName) || normalizedDisplayName.length > MAX_DISPLAY_NAME_LENGTH){
+        throw new functions.https.HttpsError("invalid-argument", 
+        "Invalid display name")
+    }
+
+    if (lowerNormalisedUsername.length === 0 || lowerNormalisedUsername.length > MAX_USERNAME_LENGTH){
+        throw new functions.https.HttpsError("invalid-argument", 
+        "Username either too long or too short")
+    }
 
     if (!regexTest.test(lowerNormalisedUsername)){
         throw new functions.https.HttpsError("invalid-argument", 
@@ -88,6 +101,11 @@ export const updateDisplayName = functions.https.onCall(
     if (isOnlyWhitespace(data)){
         throw new functions.https.HttpsError("invalid-argument", 
         "Display name is empty or has only whitespace")
+    }
+
+    if (data.length > MAX_DISPLAY_NAME_LENGTH){
+        throw new functions.https.HttpsError("invalid-argument", 
+        "Display name too long")
     }
 
     const normalizedDisplayName = data.normalize("NFKC")

@@ -7,6 +7,8 @@ import {returnStatuses, leaseStatus, notSignedInError} from './standardHttpsData
 import admin = require('firebase-admin');
 import { isEmptyObject, objectDifference, isOnlyWhitespace, isNullOrUndefined, randomKey } from './standardFunctions';
 
+export const MAX_GROUP_NAME_LENGTH = 40
+
 enum groupRanks {
     STANDARD = "standard",
     ADMIN = "admin"
@@ -66,7 +68,7 @@ export const createGroup = functions.https.onCall(
     async (data : groupCreationRequest, context) => {
     
     authCheck(context)
-    if (isEmptyObject(data.usersToAdd) || (isOnlyWhitespace(data.name))){
+    if (isEmptyObject(data.usersToAdd) || isOnlyWhitespace(data.name) || data.name.length > MAX_GROUP_NAME_LENGTH){
         throw new functions.https.HttpsError(
             'invalid-argument', "Empty member list or invlaid group name")
     }
@@ -111,6 +113,11 @@ export const editGroup = functions.https.onCall(
     async (data : groupEditRequest, context) => {
     
     authCheck(context)
+
+    if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_GROUP_NAME_LENGTH)){
+        throw new functions.https.HttpsError(
+            'invalid-argument', "Invlaid group name")
+    }
 
     const userRank = (await database
         .ref(`/userGroups/${data.groupUid}/memberSnippets/${context.auth?.uid}/rank`)
