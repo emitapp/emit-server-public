@@ -1,6 +1,147 @@
 {
   "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null"
+    //Uncomment these for dev if needed
+    //Be sure to comment them again for producion
+    //The syntax of RTDB rules would allow these two commands to override all the other rules
+    //".read": true,
+    //".write": true,
+
+
+    //Everyone can read, noone can write (only cloud functions can write)
+    "userSnippets": {
+      ".read": "auth.uid != null",
+      ".write": "false",
+      ".indexOn": ["usernameQuery", "displayNameQuery"]
+    },
+
+
+    //Anyone can read, only the owners can write (based on some specifications)
+    //Only 5 properties are allowed, anything else is invalid
+    //Owners can write and delete, but when they're writing it can't be too long
+    "userSnippetExtras":{
+      ".read": "auth.uid != null",
+      "$uid":{
+        ".write": "auth.uid == $uid",
+        "facebook":{".validate": "(!newData.exists()) || (newData.isString() && newData.val().length <= 100)"},
+        "instagram":{".validate": "(!newData.exists()) || (newData.isString() && newData.val().length <= 30)"},
+        "github":{".validate": "(!newData.exists()) || (newData.isString() && newData.val().length <= 39)"},
+        "snapchat":{".validate": "(!newData.exists()) || (newData.isString() && newData.val().length <= 30)"},
+        "twitter":{".validate": "(!newData.exists()) || (newData.isString() && newData.val().length <= 15)"},
+        "$other": { ".validate": false }
+      }
+    },
+
+
+    //Everyone can read, noone can write (only cloud functions)
+    "_allUsernames": {
+      ".read": "auth.uid != null",
+      ".write": false
+    },
+
+
+    //People can only view thier inboxes and outboxes, they can't write to them
+    //Creation and deletion is handled by cloud functions
+    "friendRequests":{
+      "$uid": {
+        "inbox": {
+          ".read": "auth.uid == $uid",
+          ".write": false
+        },
+        "outbox": {
+          ".read": "auth.uid == $uid",
+          ".write": false
+        }
+      }
+    },
+
+
+    //Users can read anything in their friend section (if they want)
+    //They can't write anything though, writing is all done by cloud functions
+    "userFriendGroupings":{
+      "$uid": {
+        ".read": "auth.uid == $uid",
+        ".write": false        
+      }
+    },
+
+
+    //Only the user theirselves can see the list of groups that they're a part of
+    //They can't write anything though, writing is all done by cloud functions
+    "userGroupMemberships":{
+      "$uid": {
+        ".read": "auth.uid == $uid",
+        ".write": false        
+      }
+    },
+
+    //Only members of a group can read it's info
+    //Writing is reserved for cloud functions
+    "userGroups":{
+      "$groupId": {
+        ".read": "auth.uid != null && data.child('memberUids').child(auth.uid).exists()",
+        ".write": false        
+      }
+    },
+
+
+    //Users can read their saved locations, and write to them if they follow a specific format
+    //Only 2 properties are allowed, anything else is invalid
+    //Owners can write and delete, but when they're writing it can't be too long are large
+    "savedLocations":{
+      "$uid":{
+        ".read": "auth.uid == $uid",
+        "$locationID":{
+          ".write": "auth.uid == $uid",
+          ".validate": "newData.hasChild('name') || !newData.exists()",
+          "name":{
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 100)"
+          },
+          "geolocation":{
+            ".validate": "newData.hasChildren(['latitude', 'longitude']) || !newData.exists()",
+            "latitude":{".validate": "(!newData.exists()) || (newData.isNumber() && newData.val() <= 90 && newData.val() >= -90)"},
+            "longitude":{".validate": "(!newData.exists()) || (newData.isNumber() && newData.val() <= 180 && newData.val() >= -180)"},
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+
+    //Only owners can read, noone can write (only cloud functions)
+    "feeds": {
+      "$uid": {
+        ".read": "auth.uid == $uid",
+        ".write": false
+      }
+    },    
+
+
+    //A user can see everything about his active broadcasts (even the /private directory)
+    //Once again, writing is reserved to cloud functions
+    //People who were sent the broadcast can also see the broadcast's /public and /responders directory
+    //If a user isn't the owner of a broadcast, the user can only view the responders that are confirmed
+    "activeBroadcasts": {
+      "$uid": {
+        "private": {
+          ".read": "auth.uid == $uid",
+          ".write": false
+        },
+        "public":{
+          ".read": "auth.uid == $uid",
+          "$broadcastId":{
+            ".read": "root.child('feeds').child(auth.uid).child($broadcastId).exists()",
+            ".write": false  
+          }
+        },
+        "responders":{
+          ".read": "auth.uid == $uid",
+          "$broadcastId":{
+            ".read": "root.child('feeds').child(auth.uid).child($broadcastId).exists() && query.orderByChild == 'status' && query.equalTo == 'Confirmed'",
+            ".write": false  
+          }
+        }
+      }
+    }
   }
 }

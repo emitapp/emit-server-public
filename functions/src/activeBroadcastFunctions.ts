@@ -43,7 +43,7 @@ interface BroadcastResponseChange {
 }
 
 enum responderStatuses {
-    CONFIRMED = "Confirmed",
+    CONFIRMED = "Confirmed", //Note that this value is also mentioned in the security rules
     IGNORED = "Ignored",
     PENDING = "Pending"
 }
