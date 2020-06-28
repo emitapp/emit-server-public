@@ -33,7 +33,7 @@
 
 
     //Everyone can read, noone can write (only cloud functions)
-    "_allUsernames": {
+    "usernames": {
       ".read": "auth.uid != null",
       ".write": false
     },
