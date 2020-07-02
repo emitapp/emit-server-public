@@ -2,8 +2,7 @@ import * as functions from 'firebase-functions';
 //@google-cloud/tasks doesn’t yet support import syntax at time of writing
 const { CloudTasksClient } = require('@google-cloud/tasks') 
 import admin = require('firebase-admin');
-import * as standardHttpsData from './standardHttpsData'
-import { isEmptyObject, truncate } from './standardFunctions';
+import { isEmptyObject, truncate, handleError, successReport, errorReport } from './utilities';
 
 export const MAX_LOCATION_NAME_LENGTH = 100
 export const MAX_BROADCAST_NOTE_LENGTH = 500
@@ -65,17 +64,14 @@ const database = admin.database()
  */
 export const createActiveBroadcast = functions.https.onCall(
     async (data: BroadcastCreationRequest, context) => {
-        
-
+    try{
         // Checking that the user is authenticated.
         if (!context.auth) {
-            throw standardHttpsData.notSignedInError()
+            throw errorReport("Authentication Needed")
         } 
 
         if (context.auth.uid !== data.ownerUid){
-            throw new functions.https.HttpsError(
-                'invalid-argument',
-                'Your auth token doens\'t match');
+            throw errorReport('Your auth token doens\'t match');
         }   
 
         let lifeTime = 0; //In minutes
@@ -86,36 +82,27 @@ export const createActiveBroadcast = functions.https.onCall(
             lifeTime = (data.deathTimestamp - Date.now()) / (60000)
         }
         if (isNaN(lifeTime) || lifeTime > MAX_BROADCAST_WINDOW || lifeTime < MIN_BROADCAST_WINDOW){
-            throw new functions.https.HttpsError(
-                'invalid-argument',
-                `Your broadcast should die between ${MIN_BROADCAST_WINDOW}`
+            throw errorReport(`Your broadcast should die between ${MIN_BROADCAST_WINDOW}`
                 + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
         }
 
         if (data.maxResponders && !Number.isInteger(data.maxResponders)){
-            throw new functions.https.HttpsError(
-                'invalid-argument', "Invalid responder cap");
+            throw errorReport("Invalid responder cap");
         }
 
         if (!data.allFriends 
             && isEmptyObject(data.friendRecepients) 
             && isEmptyObject(data.maskRecepients) 
             && isEmptyObject(data.groupRecepients)){
-            throw new functions.https.HttpsError(
-                'invalid-argument',
-                `Your broadcast has no recepients!`);
+            throw errorReport(`Your broadcast has no recepients!`);
         }
 
         if (data.note && data.note.length > MAX_BROADCAST_NOTE_LENGTH){
-            throw new functions.https.HttpsError(
-                'invalid-argument',
-                `Broadcast note too long`);
+            throw errorReport(`Broadcast note too long`);
         }
 
         if (data.location.length > MAX_LOCATION_NAME_LENGTH){
-            throw new functions.https.HttpsError(
-                'invalid-argument',
-                `Broadcast location name too long`);
+            throw errorReport(`Broadcast location name too long`);
         }
 
         //Setting things up for the batch write
@@ -126,9 +113,7 @@ export const createActiveBroadcast = functions.https.onCall(
         
         const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
         if (!ownerSnippetSnapshot.exists()){
-            throw new functions.https.HttpsError(
-                "failed-precondition",
-                `Owner snapshot missing - your account isn't set up yet`);
+            throw errorReport(`Owner snapshot missing - your account isn't set up yet`);
         }
 
         //Making the object that will actually be in people's feeds
@@ -222,7 +207,10 @@ export const createActiveBroadcast = functions.https.onCall(
         //First giving the main broadcast it's deletion task's id
         updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
         await database.ref().update(updates);
-        return {status: standardHttpsData.returnStatuses.OK}
+        return successReport()
+    }catch(err){
+        return handleError(err)
+    }
 });
 
 /**
@@ -248,122 +236,113 @@ export const autoDeleteBroadcast =
  */
 export const setBroadcastResponse = functions.https.onCall(
     async (data: BroadcastResponseChange, context) => {
+    try{
+        if (!context.auth) {
+            throw errorReport("Authentication Needed")
+        } 
 
-    if (!context.auth) {
-        throw standardHttpsData.notSignedInError()
-    } 
-
-    if (isEmptyObject(data.newStatuses)){
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'No new statuses to change');
-    }
-
-    const broadcastRecepients = 
-    (await database
-    .ref(`activeBroadcasts/${data.broadcasterUid}/private/${data.broadcastUid}/recepientUids`)
-    .once('value'))
-    .val()
-
-    if (broadcastRecepients === null){
-        throw new functions.https.HttpsError(
-            "failed-precondition",
-            'Broadcast doesn\'t exist');
-    }
-
-    const autoConfirm = 
-    (await database
-    .ref(`activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/autoConfirm`)
-    .once('value'))
-    .val()
-
-
-    //Now that we've done all the crtitcal error checks, getting ready to process all the changes
-    //simultaneously
-    const updates : { [key: string]: responderStatuses } = {}
-    const responseChangePromises : Array<Promise<void>> = []
-
-    const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
-    const pendingCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
-    const deltas = {confirmations: 0, pending: 0}
-
-    const writePromise = async (key: string) => {
-        const newStatus = data.newStatuses[key]
-
-        if (!isRealRecepient(broadcastRecepients, key)){
-            throw new functions.https.HttpsError(
-                "failed-precondition",
-                'Responder was never a recepient');
+        if (isEmptyObject(data.newStatuses)){
+            throw errorReport('No new statuses to change');
         }
 
-        if (!context.auth 
-            || (context.auth.uid !== data.broadcasterUid && context.auth.uid !== key)){
-            throw new functions.https.HttpsError(
-                'permission-denied',
-                'You don\'t have the the permission to change this user\'s status');
-        }
-
-        //We should also make sure that if the broadcast wasn't auto-confirm
-        //then only the broadcaster can set people to confirmed
-        if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
-            throw new functions.https.HttpsError(
-                'permission-denied',
-                'Only the owner of manual confirm broacasts can confirm responders');
-        }
-
-        //Now we're first going to check if this user still exists
-        const responderSnippet = (await database
-        .ref(`userSnippets/${key}`)
+        const broadcastRecepients = 
+        (await database
+        .ref(`activeBroadcasts/${data.broadcasterUid}/private/${data.broadcastUid}/recepientUids`)
         .once('value'))
         .val()
 
-        if (!responderSnippet){
-            throw new functions.https.HttpsError(
-                "failed-precondition",
-                `Owner snapshot missing - user has probably deleted their account`);
+        if (broadcastRecepients === null){
+            throw errorReport('Broadcast doesn\'t exist');
         }
-         
-        //Then we're going to nake note of thier change in status to change some 
-        //counters.
-        const responderSnippetPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`
-        const responderResponseSnippet = (await database
-        .ref(responderSnippetPath)
+
+        const autoConfirm = 
+        (await database
+        .ref(`activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/autoConfirm`)
         .once('value'))
         .val()
 
-        recordResponseDeltas(
-            responderResponseSnippet ? responderResponseSnippet.status : null,
-            newStatus,
-            deltas)
 
-        //We could have also constructed this using responderResponseSnippet
-        //but I used the responderSnippet because there's chance to update some 
-        //things that the responder might have changed since they responded
-        //(like maybe their display name).
-        const newValue = {...responderSnippet, status: newStatus}
-        updates[responderSnippetPath] = newValue
+        //Now that we've done all the crtitcal error checks, getting ready to process all the changes
+        //simultaneously
+        const updates : { [key: string]: responderStatuses } = {}
+        const responseChangePromises : Array<Promise<void>> = []
 
-        //Also making sure this reflects on the responder's feed
-        //If people are being ignored, then only signal "pending" on thier feed
-        if (newStatus === responderStatuses.IGNORED){
-            updates[`feeds/${key}/${data.broadcastUid}/status`] = responderStatuses.PENDING
-        }else{
-            updates[`feeds/${key}/${data.broadcastUid}/status`] = newStatus        
-        }
-    } 
+        const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
+        const pendingCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
+        const deltas = {confirmations: 0, pending: 0}
 
-    Object.keys(data.newStatuses).forEach(key => {   
-        responseChangePromises.push(writePromise(key))  
-    });
+        const writePromise = async (key: string) => {
+            const newStatus = data.newStatuses[key]
+
+            if (!isRealRecepient(broadcastRecepients, key)){
+                throw errorReport('Responder was never a recepient');
+            }
+
+            if (!context.auth 
+                || (context.auth.uid !== data.broadcasterUid && context.auth.uid !== key)){
+                throw errorReport('You don\'t have the the permission to change this user\'s status');
+            }
+
+            //We should also make sure that if the broadcast wasn't auto-confirm
+            //then only the broadcaster can set people to confirmed
+            if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
+                throw errorReport('Only the owner of manual confirm broacasts can confirm responders');
+            }
+
+            //Now we're first going to check if this user still exists
+            const responderSnippet = (await database
+            .ref(`userSnippets/${key}`)
+            .once('value'))
+            .val()
+
+            if (!responderSnippet){
+                throw errorReport(`Owner snapshot missing - user has probably deleted their account`);
+            }
+            
+            //Then we're going to nake note of thier change in status to change some 
+            //counters.
+            const responderSnippetPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`
+            const responderResponseSnippet = (await database
+            .ref(responderSnippetPath)
+            .once('value'))
+            .val()
+
+            recordResponseDeltas(
+                responderResponseSnippet ? responderResponseSnippet.status : null,
+                newStatus,
+                deltas)
+
+            //We could have also constructed this using responderResponseSnippet
+            //but I used the responderSnippet because there's chance to update some 
+            //things that the responder might have changed since they responded
+            //(like maybe their display name).
+            const newValue = {...responderSnippet, status: newStatus}
+            updates[responderSnippetPath] = newValue
+
+            //Also making sure this reflects on the responder's feed
+            //If people are being ignored, then only signal "pending" on thier feed
+            if (newStatus === responderStatuses.IGNORED){
+                updates[`feeds/${key}/${data.broadcastUid}/status`] = responderStatuses.PENDING
+            }else{
+                updates[`feeds/${key}/${data.broadcastUid}/status`] = newStatus        
+            }
+        } 
+
+        Object.keys(data.newStatuses).forEach(key => {   
+            responseChangePromises.push(writePromise(key))  
+        });
 
 
-    await Promise.all(responseChangePromises)
-    await Promise.all([
-        pendingCounterRef.transaction(count => count + deltas.pending),
-        confirmCounterRef.transaction(count => count + deltas.confirmations)
-    ])
-    await database.ref().update(updates);
-    return {status: standardHttpsData.returnStatuses.OK}
+        await Promise.all(responseChangePromises)
+        await Promise.all([
+            pendingCounterRef.transaction(count => count + deltas.pending),
+            confirmCounterRef.transaction(count => count + deltas.confirmations)
+        ])
+        await database.ref().update(updates);
+        return successReport()
+    }catch(err){
+        return handleError(err)
+    }
 })
 
 export const lockBroadcastIfNeeded = functions.database.ref('activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid}')
@@ -427,8 +406,7 @@ const generateRecepientObject =
         (await database.ref(`userGroupMemberships/${userUid}/${groupUid}/name`)
             .once("value")).val()
         if (!groupName){
-            throw new functions.https.HttpsError(
-                "failed-precondition", "You're not a member of one of these groups")
+            throw errorReport("You're not a member of one of these groups")
         }
 
         const members = 
@@ -467,7 +445,7 @@ const generateRecepientObject =
     }else{
         for (const friendUid in data.friendRecepients) {
             if (allFriends[friendUid]) allRecepients.direct[friendUid] = true
-            else throw new functions.https.HttpsError("failed-precondition", "Non-friend uid provided")
+            else throw errorReport("Non-friend uid provided")
         }
     }
     return allRecepients;

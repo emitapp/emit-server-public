@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import * as standardHttpsData from './standardHttpsData'
+import {handleError, successReport, errorReport} from './utilities';
 import admin = require('firebase-admin');
 
 const database = admin.database()
@@ -18,20 +18,16 @@ const standardChecks = (
     context : functions.https.CallableContext) => {
     // Checking that the user is authenticated.
     if (!context.auth) {
-        throw standardHttpsData.notSignedInError()
+        throw errorReport("Authentication Needed")
     }
 
     //Make sure params are non-empty
     if (data.from.length === 0 || data.to.length === 0) {
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'Either your to or from param is empty.');
+        throw errorReport('Either your to or from param is empty.');
     }
 
     if (context.auth.uid !== data.from){
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'Your auth token doens\'t match');
+        throw errorReport('Your auth token doens\'t match');
     }   
 }
 
@@ -40,27 +36,28 @@ const standardChecks = (
  */
 export const sendFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
-    
-    standardChecks(data, context)
+    try{
+        standardChecks(data, context)
 
-    if (!context.auth || context.auth.uid === data.to){
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'You can\'t send a friend request to yourself!');
-    }
+        if (!context.auth || context.auth.uid === data.to){
+            throw errorReport('You can\'t send a friend request to yourself!');
+        }
 
-    //Check if the to destination exists as a user...
-    const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
-    const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
-    if (!toSnapshot.exists()){
-        return {status: standardHttpsData.returnStatuses.NOTO}
-    }else{
-        const updates = {} as any;
-        const timestamp = Date.now()
-        updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
-        updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
-        await database.ref().update(updates);
-        return {status: standardHttpsData.returnStatuses.OK}
+        //Check if the to destination exists as a user...
+        const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
+        const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
+        if (!toSnapshot.exists()){
+            return errorReport("This user doesn't exist")
+        }else{
+            const updates = {} as any;
+            const timestamp = Date.now()
+            updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
+            updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
+            await database.ref().update(updates);
+            return successReport()
+        }
+    }catch(err){
+        return handleError(err)
     }
 });
 
@@ -70,28 +67,28 @@ export const sendFriendRequest = functions.https.onCall(
  */
 export const cancelFriendRequest = functions.https.onCall(
     async (data : friendRequestCancelStruct, context) => {
-    
-    standardChecks(data, context)
+    try{
+        standardChecks(data, context)
 
-    if (!context.auth || context.auth.uid === data.to){
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'You can\'t send a friend request to yourself!');
-    }
+        if (!context.auth || context.auth.uid === data.to){
+            throw errorReport('You can\'t send a friend request to yourself!');
+        }
 
-    //We don't have to check if the destination exists because
-    //it doens't really matter...
-    const updates = {} as any;
-    if (data.fromInbox){
-        updates[`/friendRequests/${data.to}/outbox/${data.from}`] = null;
-        updates[`/friendRequests/${data.from}/inbox/${data.to}`] = null;
-    }else{
-        updates[`/friendRequests/${data.to}/inbox/${data.from}`] = null;
-        updates[`/friendRequests/${data.from}/outbox/${data.to}`] = null;
+        //We don't have to check if the destination exists because
+        //it doens't really matter...
+        const updates = {} as any;
+        if (data.fromInbox){
+            updates[`/friendRequests/${data.to}/outbox/${data.from}`] = null;
+            updates[`/friendRequests/${data.from}/inbox/${data.to}`] = null;
+        }else{
+            updates[`/friendRequests/${data.to}/inbox/${data.from}`] = null;
+            updates[`/friendRequests/${data.from}/outbox/${data.to}`] = null;
+        }
+        await database.ref().update(updates);
+        return successReport()
+    }catch(err){
+        return handleError(err)
     }
-    await database.ref().update(updates);
-    return {status: standardHttpsData.returnStatuses.OK}
- 
 });
 
 
@@ -100,80 +97,80 @@ export const cancelFriendRequest = functions.https.onCall(
  */
 export const acceptFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {
-    
-    standardChecks(data, context)
+    try{
+        standardChecks(data, context)
 
-    if (!context.auth || context.auth.uid === data.to){
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'You cannot do this operation to yourself!');
+        if (!context.auth || context.auth.uid === data.to){
+            throw errorReport('You cannot do this operation to yourself!');
+        }
+
+        const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
+        const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
+        const inboxSnapshot = await database.ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
+
+        const updates = {} as any;
+        let response = {} as any
+        updates[`/friendRequests/${data.from}/inbox/${data.to}`] = null;
+        updates[`/friendRequests/${data.to}/outbox/${data.from}`] = null;
+
+        //If the desintation doesn't exist, then let's just erase this friend request
+        if (!toSnapshot.exists()){
+            response = errorReport("This user doesn't exist!")
+        }else if (!inboxSnapshot.exists()){ 
+            //This user is trying to accept a request that was never sent to them
+            response = errorReport("This user never sent you a friend request")
+        }else{
+            updates[`/userFriendGroupings/${data.from}/_masterSnippets/${data.to}`] = toSnapshot.val();
+            updates[`/userFriendGroupings/${data.to}/_masterSnippets/${data.from}`] = fromSnapshot.val();
+            updates[`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`] = true;
+            updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
+            response = successReport()
+        }
+
+        await database.ref().update(updates);
+        return response
+    }catch(err){
+        return handleError(err)
     }
-
-    const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
-    const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
-    const inboxSnapshot = await database.ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
-
-    const updates = {} as any;
-    const response = {} as any
-    updates[`/friendRequests/${data.from}/inbox/${data.to}`] = null;
-    updates[`/friendRequests/${data.to}/outbox/${data.from}`] = null;
-
-    //If the desintation doesn't exist, then let's just erase this friend request
-    if (!toSnapshot.exists()){
-        response.status = standardHttpsData.returnStatuses.NOTO
-    }else if (!inboxSnapshot.exists()){ 
-        //This user is trying to accept a request that was never sent to them
-        response.status = standardHttpsData.returnStatuses.INVALID
-    }else{
-        updates[`/userFriendGroupings/${data.from}/_masterSnippets/${data.to}`] = toSnapshot.val();
-        updates[`/userFriendGroupings/${data.to}/_masterSnippets/${data.from}`] = fromSnapshot.val();
-        updates[`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`] = true;
-        updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
-        response.status = standardHttpsData.returnStatuses.OK
-    }
-
-    await database.ref().update(updates);
-    return response
 });
 
 export const removeFriend = functions.https.onCall(
     async (data : fromToStruct, context) => {
-    
-    standardChecks(data, context)
-    const updates = {} as any;
-    const response = {} as any
+    try{
+        standardChecks(data, context)
+        const updates = {} as any;
 
-    if (!context.auth || context.auth.uid === data.to){
-        response.status = standardHttpsData.returnStatuses.INVALID
-        return status
-    }
-
-    const friendExists = (await database.ref(`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`)
-        .once("value")).exists()
-    if (!friendExists){
-        response.status = standardHttpsData.returnStatuses.NOTO
-        return status
-    }
-
-    //First, get all yout friends uids...
-    const addAllRelevantPaths = async (friendA:string, friendB:string) => {
-        updates[`/userFriendGroupings/${friendA}/_masterUIDs/${friendB}`] = null
-        updates[`/userFriendGroupings/${friendA}/_masterSnippets/${friendB}`] = null
-        const membershipListSnapshot = await database.ref(`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`)
-            .once("value")
-        if (membershipListSnapshot.exists()){
-            updates[`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`] = null
-            for (const maskUid in membershipListSnapshot.val()) {
-                updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberSnippets/${friendB}`] = null
-                updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberUids/${friendB}`] = null
-            }
+        if (!context.auth || context.auth.uid === data.to){
+            return errorReport("Token mismatch")
         }
-    } 
 
-    await Promise.all([addAllRelevantPaths(data.from, data.to), addAllRelevantPaths(data.to, data.from)])
-    await database.ref().update(updates);
-    response.status = standardHttpsData.returnStatuses.OK
-    return response
+        const friendExists = (await database.ref(`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`)
+            .once("value")).exists()
+        if (!friendExists){
+            return errorReport("This user was never your friend")
+        }
+
+        //First, get all yout friends uids...
+        const addAllRelevantPaths = async (friendA:string, friendB:string) => {
+            updates[`/userFriendGroupings/${friendA}/_masterUIDs/${friendB}`] = null
+            updates[`/userFriendGroupings/${friendA}/_masterSnippets/${friendB}`] = null
+            const membershipListSnapshot = await database.ref(`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`)
+                .once("value")
+            if (membershipListSnapshot.exists()){
+                updates[`/userFriendGroupings/${friendA}/_friendMaskMemberships/${friendB}`] = null
+                for (const maskUid in membershipListSnapshot.val()) {
+                    updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberSnippets/${friendB}`] = null
+                    updates[`/userFriendGroupings/${friendA}/custom/details/${maskUid}/memberUids/${friendB}`] = null
+                }
+            }
+        } 
+
+        await Promise.all([addAllRelevantPaths(data.from, data.to), addAllRelevantPaths(data.to, data.from)])
+        await database.ref().update(updates);
+        return successReport();
+    }catch(err){
+        return handleError(err)
+    }
 });
 
 export interface FriendshipRelatedPaths {
@@ -202,8 +199,8 @@ export interface FriendshipRelatedPaths {
     paths.requestMailbox = `/friendRequests/${userUid}`
 
     // 3) Getting copies of friend requests in peoples inboxes and outboxes...
-    const allInboxRequests = (await database.ref(`/friendRequests/${userUid}/inbox`).once("value")).val
-    const allOutboxRequests = (await database.ref(`/friendRequests/${userUid}/outbox`).once("value")).val
+    const allInboxRequests = (await database.ref(`/friendRequests/${userUid}/inbox`).once("value")).val()
+    const allOutboxRequests = (await database.ref(`/friendRequests/${userUid}/outbox`).once("value")).val()
     for (const senderUid in allInboxRequests) {
         paths.receivedFriendRequests.push(`/friendRequests/${senderUid}/outbox/${userUid}`)
     }

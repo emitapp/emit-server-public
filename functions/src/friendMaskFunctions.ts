@@ -1,6 +1,5 @@
 import * as functions from 'firebase-functions';
-import { isOnlyWhitespace } from './standardFunctions';
-import { notSignedInError, returnStatuses } from './standardHttpsData';
+import {isOnlyWhitespace, handleError, successReport, errorReport} from './utilities';
 import admin = require('firebase-admin');
 
 const database = admin.database()
@@ -16,80 +15,84 @@ export const MAX_MASK_NAME_LENGTH = 40
 
 export const createOrEditMask = functions.https.onCall(
   async (data : maskEditRequest, context) => {
-
-  if (!context.auth) {
-      throw notSignedInError()
-  }
-
-  if (!data.maskUid && !data.newName ){
-    throw new functions.https.HttpsError(
-      'invalid-argument', "No name for mask")
-  }
-
-  if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_MASK_NAME_LENGTH)){
-    throw new functions.https.HttpsError(
-      'invalid-argument', "Invalid name for mask")
-  }
-
-  const maskUid = data.maskUid || database.ref(`/userFriendGroupings/${context.auth.uid}/custom/snippets`).push().key
-  const maskSnippetPath = `/userFriendGroupings/${context.auth.uid}/custom/snippets/${maskUid}`
-  const maskDetailsPath = `/userFriendGroupings/${context.auth.uid}/custom/details/${maskUid}`
-
-  const updates = {} as any
-  const promises = []
-  const userAdditionPromise = async (uid : string) => {
-    const userSnippetSnap = await database.ref(`userFriendGroupings/${context.auth?.uid}/_masterSnippets/${uid}`).once("value")
-    if (!userSnippetSnap.exists()){
-      throw new functions.https.HttpsError(
-        "failed-precondition", "One of the people you're tring to add isn't one of your friends"
-      )
+  try{
+    if (!context.auth) {
+      throw errorReport("Authentication Needed")
     }
-    updates[`${maskDetailsPath}/memberSnippets/${uid}`] = userSnippetSnap.val()
-    updates[`${maskDetailsPath}/memberUids/${uid}`] = true
-    updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${maskUid}`] = true
-  }
 
-  if (data.newName) updates[`${maskSnippetPath}/name`] = data.newName
-  for (const uid in data.usersToAdd) {
-    promises.push(userAdditionPromise(uid))
-  }
-  for (const uid in data.usersToRemove) {
-    updates[`${maskDetailsPath}/memberSnippets/${uid}`] = null
-    updates[`${maskDetailsPath}/memberUids/${uid}`] = null
-    updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${maskUid}`] = null
-  }
+    if (!data.maskUid && !data.newName ){
+      throw errorReport("No name for mask")
+    }
 
-  await Promise.all(promises)
-  await database.ref().update(updates);
-  return {status: returnStatuses.OK}
+    if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_MASK_NAME_LENGTH)){
+      throw errorReport("Invalid name for mask")
+    }
+
+    const maskUid = data.maskUid || database.ref(`/userFriendGroupings/${context.auth.uid}/custom/snippets`).push().key
+    const maskSnippetPath = `/userFriendGroupings/${context.auth.uid}/custom/snippets/${maskUid}`
+    const maskDetailsPath = `/userFriendGroupings/${context.auth.uid}/custom/details/${maskUid}`
+
+    const updates = {} as any
+    const promises = []
+    const userAdditionPromise = async (uid : string) => {
+      const userSnippetSnap = await database.ref(`userFriendGroupings/${context.auth?.uid}/_masterSnippets/${uid}`).once("value")
+      if (!userSnippetSnap.exists()){
+        throw new functions.https.HttpsError(
+          "failed-precondition", "One of the people you're tring to add isn't one of your friends"
+        )
+      }
+      updates[`${maskDetailsPath}/memberSnippets/${uid}`] = userSnippetSnap.val()
+      updates[`${maskDetailsPath}/memberUids/${uid}`] = true
+      updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${maskUid}`] = true
+    }
+
+    if (data.newName) updates[`${maskSnippetPath}/name`] = data.newName
+    for (const uid in data.usersToAdd) {
+      promises.push(userAdditionPromise(uid))
+    }
+    for (const uid in data.usersToRemove) {
+      updates[`${maskDetailsPath}/memberSnippets/${uid}`] = null
+      updates[`${maskDetailsPath}/memberUids/${uid}`] = null
+      updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${maskUid}`] = null
+    }
+
+    await Promise.all(promises)
+    await database.ref().update(updates);
+    return successReport()
+  }catch(err){
+    return handleError(err)
+  }
 });
 
 export const deleteMask = functions.https.onCall(
   async (data : maskEditRequest, context) => {
+  try{
+    if (!context.auth) {
+      throw errorReport("Authentication Needed")
+    }
 
-  if (!context.auth) {
-      throw notSignedInError()
+    if (isOnlyWhitespace(<string>data.maskUid)){
+      throw new functions.https.HttpsError(
+        "invalid-argument", "Invalid group uid"
+      )
+    }
+
+    const snippetPath = `/userFriendGroupings/${context.auth.uid}/custom/snippets/${data.maskUid}`
+    const infoPath = `/userFriendGroupings/${context.auth.uid}/custom/details/${data.maskUid}`
+    const updates = {} as any
+    updates[infoPath] = null
+    updates[snippetPath] = null
+
+    const memberListSnap  = await database.ref(`${infoPath}/memberUids`).once("value")
+    for (const uid in memberListSnap.val()) {
+      updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${data.maskUid}`] = null
+    }
+
+    await database.ref().update(updates);
+    return successReport()
+  }catch(err){
+    return handleError(err)
   }
-
-  if (isOnlyWhitespace(<string>data.maskUid)){
-    throw new functions.https.HttpsError(
-      "invalid-argument", "Invalid group uid"
-    )
-  }
-
-  const snippetPath = `/userFriendGroupings/${context.auth.uid}/custom/snippets/${data.maskUid}`
-  const infoPath = `/userFriendGroupings/${context.auth.uid}/custom/details/${data.maskUid}`
-  const updates = {} as any
-  updates[infoPath] = null
-  updates[snippetPath] = null
-
-  const memberListSnap  = await database.ref(`${infoPath}/memberUids`).once("value")
-  for (const uid in memberListSnap.val()) {
-    updates[`/userFriendGroupings/${context.auth?.uid}/_friendMaskMemberships/${uid}/${data.maskUid}`] = null
-  }
-
-  await database.ref().update(updates);
-  return {status: returnStatuses.OK}
 });
 
 export const updateMaskMemberCount = functions.database.ref('/userFriendGroupings/{userUid}/custom/details/{maskUid}/memberUids')

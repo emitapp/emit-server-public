@@ -1,7 +1,6 @@
 import * as functions from 'firebase-functions';
-import * as standardHttpsData from './standardHttpsData'
 import admin = require('firebase-admin');
-import { objectDifference } from './standardFunctions';
+import { objectDifference, errorReport, handleError, successReport } from './utilities';
 
 type fcmToken = string;
 type tokenDictionary = { [key: string]: string []; }
@@ -17,42 +16,43 @@ const fcmTokensRef = firestore.collection("fcmTokenData")
  */
 export const updateFCMTokenData = functions.https.onCall(
     async (data : fcmToken, context) => {
+    try{
+        // Checking that the user is authenticated.
+        if (!context.auth) {
+            throw errorReport("Authentication Error")
+        }
 
-     // Checking that the user is authenticated.
-     if (!context.auth) {
-        throw standardHttpsData.notSignedInError()
+        //Make sure the token is non-emoty 
+        if (data.length === 0) {
+            throw errorReport('Your token in empty');
+        }
+
+        //Only one user should be associated with any fcm token at a given time
+        //So find any documents that have this token and delete it from them 
+        const query = fcmTokensRef.where("tokens", "array-contains", data)
+        const documents = await query.get();
+        const batchDelete = firestore.batch();
+
+        documents.forEach(doc => {
+            batchDelete.update(
+                fcmTokensRef.doc(doc.id), 
+                {tokens: admin.firestore.FieldValue.arrayRemove(data)})
+        })
+        await batchDelete.commit()
+
+        //Now we can associate this token with it's new 'owner'
+        const mainDocRef = fcmTokensRef.doc(context.auth.uid);
+        const mainDoc = await mainDocRef.get();
+        if (!mainDoc.exists) {
+            await mainDocRef.set({tokens: [data]})
+        }else{
+            await mainDocRef.update({tokens: admin.firestore.FieldValue.arrayUnion(data)})
+        }
+
+        return successReport()
+    }catch(err){
+        return handleError(err)
     }
-
-    //Make sure the token is non-emoty 
-    if (data.length === 0) {
-        throw new functions.https.HttpsError(
-            'invalid-argument',
-            'Your token in empty');
-    }
-
-    //Only one user should be associated with any fcm token at a given time
-    //So find any documents that have this token and delete it from them 
-    const query = fcmTokensRef.where("tokens", "array-contains", data)
-    const documents = await query.get();
-    const batchDelete = firestore.batch();
-
-    documents.forEach(doc => {
-        batchDelete.update(
-            fcmTokensRef.doc(doc.id), 
-            {tokens: admin.firestore.FieldValue.arrayRemove(data)})
-    })
-    await batchDelete.commit()
-
-    //Now we can associate this token with it's new 'owner'
-    const mainDocRef = fcmTokensRef.doc(context.auth.uid);
-    const mainDoc = await mainDocRef.get();
-    if (!mainDoc.exists) {
-        await mainDocRef.set({tokens: [data]})
-    }else{
-        await mainDocRef.update({tokens: admin.firestore.FieldValue.arrayUnion(data)})
-    }
-
-    return {status: standardHttpsData.returnStatuses.OK}
 });
 
 /**
@@ -173,6 +173,7 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
         tokenArrayChunks.forEach(chunk => multicastPromises.push(mulitcastPromise(chunk)));
         await Promise.all(multicastPromises)
     }catch(err){
+        //It's not that important, just console log for now
         console.error(err)
     }
 }

@@ -3,9 +3,19 @@
 //These were needed because functions and triggers can't enforce order on their own
 
 import * as functions from 'firebase-functions';
-import {returnStatuses, leaseStatus, notSignedInError} from './standardHttpsData'
 import admin = require('firebase-admin');
-import { isEmptyObject, objectDifference, isOnlyWhitespace, isNullOrUndefined, randomKey } from './standardFunctions';
+import { 
+    isEmptyObject, 
+    objectDifference, 
+    isOnlyWhitespace, 
+    isNullOrUndefined, 
+    randomKey, 
+    leaseStatus,
+    errorReport,
+    successReport,
+    handleError,
+    ExecutionStatus
+} from './utilities';
 
 export const MAX_GROUP_NAME_LENGTH = 40
 
@@ -35,7 +45,7 @@ const database = admin.database()
  */
 const authCheck = (context : functions.https.CallableContext) => {
     if (!context.auth) {
-        throw notSignedInError()
+        throw errorReport("Authentication needed")
     }
 }
 
@@ -66,44 +76,46 @@ const claimGroupLease = async (groupUid: string) : Promise<leaseStatus> => {
  */
 export const createGroup = functions.https.onCall(
     async (data : groupCreationRequest, context) => {
-    
-    authCheck(context)
-    if (isEmptyObject(data.usersToAdd) || isOnlyWhitespace(data.name) || data.name.length > MAX_GROUP_NAME_LENGTH){
-        throw new functions.https.HttpsError(
-            'invalid-argument', "Empty member list or invlaid group name")
-    }
-
-    let groupMasterPath = `/userGroups/`
-    const groupUid = database.ref(groupMasterPath).push().key
-    groupMasterPath += groupUid
-
-    const userUid = context.auth?.uid
-    const updates = {} as any
-    const snippetAdditionPromises = []
-    const additionPromise = async (uid : string) => {
-        const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
-        if (!snippetSnapshot.exists()){
-            throw new functions.https.HttpsError('failed-precondition', "A User you're trying to add doesn't exist");
+    try{
+        authCheck(context)
+        if (isEmptyObject(data.usersToAdd) || isOnlyWhitespace(data.name) || data.name.length > MAX_GROUP_NAME_LENGTH){
+            throw errorReport("Empty member list or invlaid group name")
         }
-        const rank = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
-        updates[`${groupMasterPath}/memberSnippets/${uid}`] = {...snippetSnapshot.val(), rank}
-    }
 
-    //The member count and admin count is handled by a trigger cloud function
-    updates[`${groupMasterPath}/snippet`] = {
-        name: data.name,
-        leaseTime: Date.now(),
-        lastEditId: database.ref().push().key
-    }
-    for (const uid of [...Object.keys(data.usersToAdd), userUid]) {
-        updates[`userGroupMemberships/${uid}/${groupUid}`] = {name: data.name}
-        updates[`${groupMasterPath}/memberUids/${uid}`] = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
-        snippetAdditionPromises.push(additionPromise(<string>uid))
-    }
+        let groupMasterPath = `/userGroups/`
+        const groupUid = database.ref(groupMasterPath).push().key
+        groupMasterPath += groupUid
 
-    await Promise.all(snippetAdditionPromises)
-    await database.ref().update(updates);
-    return {status: returnStatuses.OK}
+        const userUid = context.auth?.uid
+        const updates = {} as any
+        const snippetAdditionPromises = []
+        const additionPromise = async (uid : string) => {
+            const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
+            if (!snippetSnapshot.exists()){
+                throw errorReport("A User you're trying to add doesn't exist");
+            }
+            const rank = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
+            updates[`${groupMasterPath}/memberSnippets/${uid}`] = {...snippetSnapshot.val(), rank}
+        }
+
+        //The member count and admin count is handled by a trigger cloud function
+        updates[`${groupMasterPath}/snippet`] = {
+            name: data.name,
+            leaseTime: Date.now(),
+            lastEditId: database.ref().push().key
+        }
+        for (const uid of [...Object.keys(data.usersToAdd), userUid]) {
+            updates[`userGroupMemberships/${uid}/${groupUid}`] = {name: data.name}
+            updates[`${groupMasterPath}/memberUids/${uid}`] = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
+            snippetAdditionPromises.push(additionPromise(<string>uid))
+        }
+
+        await Promise.all(snippetAdditionPromises)
+        await database.ref().update(updates);
+        return successReport
+    }catch(err){
+        return handleError(err)
+    }
 });
 
 /**
@@ -111,99 +123,104 @@ export const createGroup = functions.https.onCall(
  */
 export const editGroup = functions.https.onCall(
     async (data : groupEditRequest, context) => {
-    
-    authCheck(context)
+    try{
+        authCheck(context)
 
-    if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_GROUP_NAME_LENGTH)){
-        throw new functions.https.HttpsError(
-            'invalid-argument', "Invlaid group name")
-    }
+        if (data.newName && (isOnlyWhitespace(data.newName) || data.newName.length > MAX_GROUP_NAME_LENGTH)){
+            throw errorReport("Invlaid group name")
+        }
 
-    const userRank = (await database
-        .ref(`/userGroups/${data.groupUid}/memberSnippets/${context.auth?.uid}/rank`)
-        .once("value")).val()
+        const userRank = (await database
+            .ref(`/userGroups/${data.groupUid}/memberSnippets/${context.auth?.uid}/rank`)
+            .once("value")).val()
 
-    //Checking if this user is removing someone apart from themselves from the group
-    const isRemovingOther = (data.usersToRemove 
-        && Object.keys(data.usersToRemove).length > 1
-        && !data.usersToRemove[(<any>context.auth).uid])
+        //Checking if this user is removing someone apart from themselves from the group
+        const isRemovingOther = (data.usersToRemove 
+            && Object.keys(data.usersToRemove).length > 1
+            && !data.usersToRemove[(<any>context.auth).uid])
 
-    const isChangingRank = !isNullOrUndefined(data.usersToPromote) || !isNullOrUndefined(data.usersToDemote)
+        const isChangingRank = !isNullOrUndefined(data.usersToPromote) || !isNullOrUndefined(data.usersToDemote)
 
-    if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
-        throw new functions.https.HttpsError('invalid-argument', 'Group does not exitst');
-    }else if (!userRank){
-        throw new functions.https.HttpsError('failed-precondition', 'Not a member of this group');
-    }else if (userRank !== groupRanks.ADMIN && (isRemovingOther || isChangingRank)){
-        throw new functions.https.HttpsError('permission-denied', 'Required admin privilidges');
-    }
+        if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
+            throw errorReport('Group does not exitst');
+        }else if (!userRank){
+            throw errorReport('Not a member of this group');
+        }else if (userRank !== groupRanks.ADMIN && (isRemovingOther || isChangingRank)){
+            throw errorReport('Required admin privilidges');
+        }
 
-    //Making sure noone is being demoted and prototed at the same time
-    if (!isNullOrUndefined(data.usersToPromote) && !isNullOrUndefined(data.usersToDemote)){
-        for (const key in data.usersToDemote) {
-            if ((<Object>data.usersToPromote).hasOwnProperty(key)) {
-                throw new functions.https.HttpsError('invalid-argument', 'Cannot promote and demote same user');     
+        //Making sure noone is being demoted and prototed at the same time
+        if (!isNullOrUndefined(data.usersToPromote) && !isNullOrUndefined(data.usersToDemote)){
+            for (const key in data.usersToDemote) {
+                if ((<Object>data.usersToPromote).hasOwnProperty(key)) {
+                    throw errorReport('Cannot promote and demote same user');     
+                }
             }
         }
-    }
 
-    if (data.usersToAdd){
-        //Making sure noone is being promoted/demoted and removed at the same time
-        const allRankChangeUsers = {...(data.usersToPromote || {}), ...(data.usersToDemote || {})}
-        for (const uid in allRankChangeUsers) {
-            if ((<Object>data.usersToAdd).hasOwnProperty(uid)) {
-                throw new functions.https.HttpsError('invalid-argument', 'Cannot promote/demote and remove same user');     
+        if (data.usersToAdd){
+            //Making sure noone is being promoted/demoted and removed at the same time
+            const allRankChangeUsers = {...(data.usersToPromote || {}), ...(data.usersToDemote || {})}
+            for (const uid in allRankChangeUsers) {
+                if ((<Object>data.usersToAdd).hasOwnProperty(uid)) {
+                    throw errorReport('Cannot promote/demote and remove same user');     
+                }
             }
         }
-    }
 
 
-    //Attempting to claim lease before we do any changes
-    const groupLeaseStatus = await claimGroupLease(data.groupUid)
-    if (groupLeaseStatus !== leaseStatus.AVAILABLE){
-        return {status: returnStatuses.LEASE_TAKEN}
+        //Attempting to claim lease before we do any changes
+        const groupLeaseStatus = await claimGroupLease(data.groupUid)
+        if (groupLeaseStatus !== leaseStatus.AVAILABLE){
+            throw errorReport("Lease already taken", ExecutionStatus.LEASE_TAKEN)
+        }
+        
+        let updates = {} as any
+        if (data.usersToAdd) updates = {...updates, ...await addMembers(data)}
+        if (data.usersToRemove) updates = {...updates, ...removeMembers(data)}
+        if (data.newName) updates = {...updates, ...await updateGroupName(data)}
+        if (data.usersToPromote) updates = {...updates, ...await changeRank(data, groupRanks.ADMIN)}
+        if (data.usersToDemote) updates = {...updates, ...await changeRank(data, groupRanks.STANDARD)}
+        updates[`/userGroups/${data.groupUid}/snippet/lastEditId`] = database.ref().push().key
+        await database.ref().update(updates);
+        return successReport()
+    }catch(err){
+        return handleError(err)
     }
-    
-    let updates = {} as any
-    if (data.usersToAdd) updates = {...updates, ...await addMembers(data)}
-    if (data.usersToRemove) updates = {...updates, ...removeMembers(data)}
-    if (data.newName) updates = {...updates, ...await updateGroupName(data)}
-    if (data.usersToPromote) updates = {...updates, ...await changeRank(data, groupRanks.ADMIN)}
-    if (data.usersToDemote) updates = {...updates, ...await changeRank(data, groupRanks.STANDARD)}
-    updates[`/userGroups/${data.groupUid}/snippet/lastEditId`] = database.ref().push().key
-    await database.ref().update(updates);
-    return {status: returnStatuses.OK}
 });
 
 export const deleteGroup = functions.https.onCall(
     async (data : groupEditRequest, context) => {
-    
-    authCheck(context)
-    const userRank = (await database
-        .ref(`/userGroups/${data.groupUid}/memberSnippets/${context.auth?.uid}/rank`)
-        .once("value")).val()
+    try{
+        authCheck(context)
+        const userRank = (await database
+            .ref(`/userGroups/${data.groupUid}/memberSnippets/${context.auth?.uid}/rank`)
+            .once("value")).val()
 
-    if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
-        throw new functions.https.HttpsError('invalid-argument', 'Group does not exitst');
-    }else if (!userRank){
-        throw new functions.https.HttpsError('failed-precondition', 'Not a member of this group');
-    }else if (userRank !== groupRanks.ADMIN){
-        throw new functions.https.HttpsError('permission-denied', 'Required admin privilidges');
+        if (!(await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).exists()){
+            throw errorReport('Group does not exitst');
+        }else if (!userRank){
+            throw errorReport('Not a member of this group');
+        }else if (userRank !== groupRanks.ADMIN){
+            throw errorReport('Required admin privilidges');
+        }
+
+        //Attempting to claim lease before we do any changes
+        const groupLeaseStatus = await claimGroupLease(data.groupUid)
+        if (groupLeaseStatus !== leaseStatus.AVAILABLE){
+            throw errorReport("Lease already taken", ExecutionStatus.LEASE_TAKEN)
+        }
+
+        const currentMembers = 
+            (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
+
+        const updates = removeMembers({groupUid: data.groupUid, usersToRemove: currentMembers})
+        updates[`/userGroups/${data.groupUid}/snippet/lastEditId`] = database.ref().push().key
+        await database.ref().update(updates); //Group snippet will be removed by updateGroupMemberAndAdminCount 
+        return successReport()
+    }catch(err){
+        return handleError(err)
     }
-
-    //Attempting to claim lease before we do any changes
-    const groupLeaseStatus = await claimGroupLease(data.groupUid)
-    if (groupLeaseStatus !== leaseStatus.AVAILABLE){
-        return {status: returnStatuses.LEASE_TAKEN}
-    }
-
-    const currentMembers = 
-        (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
-
-    const updates = removeMembers({groupUid: data.groupUid, usersToRemove: currentMembers})
-    updates[`/userGroups/${data.groupUid}/snippet/lastEditId`] = database.ref().push().key
-    await database.ref().update(updates); //Group snippet will be removed by updateGroupMemberAndAdminCount 
-    return {status: returnStatuses.OK}
 });
 
 
@@ -261,7 +278,7 @@ const addMembers = async (data : groupEditRequest) => {
     const snippetAdditionPromise = async (uid : string) => {
         const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
         if (!snippetSnapshot.exists()){
-            throw new functions.https.HttpsError('failed-precondition', "You're trying to add someone who doesn't exits");
+            throw errorReport("You're trying to add someone who doesn't exits");
         }
         updates[`/userGroups/${data.groupUid}/memberSnippets/${uid}`] 
             = {...snippetSnapshot.val(), rank: groupRanks.STANDARD}
@@ -296,7 +313,7 @@ const changeRank = async (data: groupEditRequest, newRank: groupRanks, checkIfUs
         if (checkIfUsersValid){
             const currentRankSnapshot = await database.ref(`/userGroups/${data.groupUid}/memberUids/${uid}`).once("value")
             if (!currentRankSnapshot.exists()){
-                throw new functions.https.HttpsError('failed-precondition', "You're trying to change the rank of someone who isn't a part of this group");
+                throw errorReport("You're trying to change the rank of someone who isn't a part of this group");
             }
         }
         updates[`/userGroups/${data.groupUid}/memberSnippets/${uid}/rank`] = newRank 

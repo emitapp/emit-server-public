@@ -1,6 +1,6 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
-import * as standardHttpsData from '../standardHttpsData'
+import {successReport, errorReport} from '../utilities'
 import {sendFCMMessageToUsers} from '../fcmFunctions'
 
 //Ensure this is false in prod
@@ -17,10 +17,13 @@ interface UidNotificationData {
 }
 
 const checkIfEnabled = () => {
-    if (TEST_FUNCS_ENABLED) return;
-    throw new functions.https.HttpsError(
-        "unauthenticated",
-        'This function is only available for testing - it is disabled in production.');
+    
+    if (TEST_FUNCS_ENABLED){
+        console.warn("Testing function has been called!")
+        return;
+    } 
+    console.error("Some testing function is being accessed even though testing is diabled.")
+    throw errorReport('This function is only available for testing - it is disabled in production.');
 }
 
 /**
@@ -37,7 +40,7 @@ export const test_sendNotificationViaToken = functions.https.onCall(
         .catch((error) => {
             console.log('Error sending message:', error);
         });
-    return {status: standardHttpsData.returnStatuses.OK} 
+    return successReport()
 });
 
 
@@ -48,5 +51,5 @@ export const test_sendNotificationViaUid = functions.https.onCall(
     async (data : UidNotificationData, context) => {
     checkIfEnabled();
     await sendFCMMessageToUsers(data.receiverUids, data.messageObject)
-    return {status: standardHttpsData.returnStatuses.OK} 
+    return successReport()
 });
