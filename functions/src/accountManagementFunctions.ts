@@ -12,10 +12,20 @@ export const MAX_USERNAME_LENGTH = 30
 export const MAX_DISPLAY_NAME_LENGTH = 35
 
 const database = admin.database()
+const firestore = admin.firestore();
+const fcmDataRef = firestore.collection("fcmData")
 
 interface snippetCreationRequest{
     displayName:string,
     username:string
+}
+
+export interface notificationSettings {
+    onBroadcastFrom: Array<string>,
+    onNewBroadcastResponse: boolean,
+    onNewFriend: boolean,
+    onNewFriendRequest: boolean,
+    onAddedToGroup: boolean
 }
 
 export const createSnippet = functions.https.onCall(
@@ -70,7 +80,18 @@ export const createSnippet = functions.https.onCall(
                 throw errorReport("Username already in use!")
             }
         });
-    
+
+        await fcmDataRef.doc(context.auth.uid).set({
+            notificationPrefs:{
+                onBroadcastFrom: [],
+                onNewBroadcastResponse: true,
+                onNewFriend: true,
+                onNewFriendRequest: true,
+                onAddedToGroup: true
+            },
+            tokens: []
+        });
+
         await snippetRef.set({
             username: normalizedUsername,
             usernameQuery: lowerNormalisedUsername,
@@ -109,6 +130,46 @@ export const updateDisplayName = functions.https.onCall(
         updates[`/userSnippets/${context.auth?.uid}/displayName`] = normalizedDisplayName
         updates[`/userSnippets/${context.auth?.uid}/displayNameQuery`] = lowerNormalisedDisplayName
         await database.ref().update(updates);
+        return successReport()
+    }catch(err){
+        return handleError(err)
+    }  
+});
+
+export const updateNotificationPrefs = functions.https.onCall(
+    async (data : notificationSettings, context) => {
+    try{
+        if (!context.auth) {
+            throw errorReport("Authentication needed")
+        }
+           
+        if (typeof data.onAddedToGroup !== 'boolean'
+            || typeof data.onNewBroadcastResponse !== 'boolean'
+            || typeof data.onNewFriend !== 'boolean'
+            || typeof data.onNewFriendRequest !== 'boolean'){
+            throw errorReport("Invalid Arguments")
+        }
+
+        if (data.onBroadcastFrom instanceof Array) {
+            data.onBroadcastFrom.forEach(uid =>
+            {
+               if(typeof uid !== 'string' || uid.length > 50){
+                throw errorReport("Invalid Arguments")
+               }
+            })
+         }else{
+            throw errorReport("Invalid Arguments")
+         }
+
+        await fcmDataRef.doc(context.auth.uid).update({
+            notificationPrefs:{
+                onBroadcastFrom: data.onBroadcastFrom,
+                onNewBroadcastResponse: data.onNewBroadcastResponse,
+                onNewFriend: data.onNewFriend,
+                onNewFriendRequest: data.onNewFriendRequest,
+                onAddedToGroup: data.onAddedToGroup
+            }
+        });
         return successReport()
     }catch(err){
         return handleError(err)
@@ -209,7 +270,6 @@ export const requestAllData = functions.https.onCall(
         })())
     
         promises.push((async () => {
-            const firestore = admin.firestore();
             const fcmTokenDoc = await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).get()
             if (fcmTokenDoc.exists) userData[allPaths.fcmRelatedPaths.tokenDocumentPath] = fcmTokenDoc.data
         })())
@@ -304,7 +364,6 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
     pushPath(allPaths.userSnippetPath)
 
     promises.push((async () => {
-        const firestore = admin.firestore();
         await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete()
     })())
    

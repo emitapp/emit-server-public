@@ -50,6 +50,6 @@ export const test_sendNotificationViaToken = functions.https.onCall(
 export const test_sendNotificationViaUid = functions.https.onCall(
     async (data : UidNotificationData, context) => {
     checkIfEnabled();
-    await sendFCMMessageToUsers(data.receiverUids, data.messageObject)
+    await sendFCMMessageToUsers(data.receiverUids, data.messageObject, {reason: 'mandatory'})
     return successReport()
 });

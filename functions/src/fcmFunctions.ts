@@ -1,12 +1,18 @@
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
 import { objectDifference, errorReport, handleError, successReport } from './utilities';
+import {notificationSettings} from './accountManagementFunctions'
 
+const firestore = admin.firestore();
+const fcmDataRef = firestore.collection("fcmData")
 type fcmToken = string;
 type tokenDictionary = { [key: string]: string []; }
-const firestore = admin.firestore();
-const fcmTokensRef = firestore.collection("fcmTokenData")
 
+type notificationReason = "newBroadcast" | "broadcastResponse" | "newFriend" | "friendRequest" | "mandatory" | "newGroup"
+interface notificationType {
+    reason: notificationReason
+    broadcastSender?: string
+}
 
 /**
  * This function should be called whenever a user signs in or gets a new FCM token
@@ -29,27 +35,27 @@ export const updateFCMTokenData = functions.https.onCall(
 
         //Only one user should be associated with any fcm token at a given time
         //So find any documents that have this token and delete it from them 
-        const query = fcmTokensRef.where("tokens", "array-contains", data)
+        const query = fcmDataRef.where("tokens", "array-contains", data)
         const documents = await query.get();
         const batchDelete = firestore.batch();
 
         documents.forEach(doc => {
             batchDelete.update(
-                fcmTokensRef.doc(doc.id), 
+                fcmDataRef.doc(doc.id), 
                 {tokens: admin.firestore.FieldValue.arrayRemove(data)})
         })
         await batchDelete.commit()
 
         //Now we can associate this token with it's new 'owner'
-        const mainDocRef = fcmTokensRef.doc(context.auth.uid);
+        const mainDocRef = fcmDataRef.doc(context.auth.uid);
         const mainDoc = await mainDocRef.get();
-        if (!mainDoc.exists) {
-            await mainDocRef.set({tokens: [data]})
-        }else{
+        if (mainDoc.exists) {
             await mainDocRef.update({tokens: admin.firestore.FieldValue.arrayUnion(data)})
+            return successReport()
+        }else{
+            console.warn(`User ${context.auth.token}'s FCM data can't be found in Firestore!`)
+            return errorReport("FCM data not in database")
         }
-
-        return successReport()
     }catch(err){
         return handleError(err)
     }
@@ -68,7 +74,7 @@ export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{rece
     message.data.senderUid = context.params.senderUid
     message.android = {}
     message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message)
+    await sendFCMMessageToUsers([context.params.receiverUid], message, {reason: 'friendRequest'})
 })
 
 /**
@@ -83,7 +89,7 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
     message.data.newFriendUid = context.params.newFriendUid
     message.android = {}
     message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message)
+    await sendFCMMessageToUsers([context.params.receiverUid], message, {reason: 'newFriend'})
 })
 
 /**
@@ -118,7 +124,7 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
     message.data.newGroupUid = context.params.groupUid
     message.android = {}
     message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers(newMembersUids, message)
+    await sendFCMMessageToUsers(newMembersUids, message, {reason: 'newGroup'})
 })
 
 
@@ -130,7 +136,10 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
  * @param bareMessage A notification object WITHOUT any recepient data
  */
 //Being exported for use in testing functions
-export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : admin.messaging.Message) => {
+export const sendFCMMessageToUsers = async (
+    userUids : string[], 
+    bareMessage : admin.messaging.Message, 
+    notifType: notificationType) => {
     try{
         if (userUids.length === 0) return;
 
@@ -139,7 +148,7 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
         const retreivalPromises : Promise<any>[] = []
         const allTokens : fcmToken[] = []
         const tokenRetrievalPromise = async (uid : string) => {
-            const tokenArray = await getFCMTokens(uid)
+            const tokenArray = await getFCMTokens(uid, notifType)
             if (tokenArray){
                 masterTokenDictionary[uid] = tokenArray
                 allTokens.push.apply(allTokens, tokenArray)
@@ -164,7 +173,7 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
                 const uid = findUidForToken(failedToken, masterTokenDictionary)
                 if (!uid) return; //This shold never be the case but I'm doing this for type safety
                 batchDelete.update(
-                    fcmTokensRef.doc(uid), 
+                    fcmDataRef.doc(uid), 
                     {tokens: admin.firestore.FieldValue.arrayRemove(failedToken)})      
                 })
             await batchDelete.commit()
@@ -179,33 +188,30 @@ export const sendFCMMessageToUsers = async (userUids : string[], bareMessage : a
 }
 
 /**
- * Creates an array of elements split into groups the length of size.
- * @param array The array to split up
- * @param size The max suze per chunk
- */
-//chunkArray(['a', 'b', 'c', 'd'], 3) => [['a', 'b', 'c'], ['d']]
-const chunkArray = (array : any[], size : number) : any[] => {
-    return array.reduce((arr, item, idx) => {
-        return idx % size === 0
-          ? [...arr, [item]]
-          : [...arr.slice(0, -1), [...arr.slice(-1)[0], item]];
-      }, []);
-}
-
-/**
  * Gets the array of FCM tokens associated with any user.
- * Returns undefined if no Firebase doc is found or if the tokens array is empty
+ * Returns undefined if no Firebase doc is found or if the tokens array is empty.
+ * This function also takes the type of the notification into account, so it'll
+ * also return undefined if the user's preferences wont allow that notification type to be sent
  * @param uid The uid of the user 
  */
-const getFCMTokens = async (uid : string) : Promise<string [] | undefined> => {
-    const document = await fcmTokensRef.doc(uid).get();
-    if (!document.exists){
-        return undefined
-    }else{
-        const array = document.data()?.tokens
-        if (array.length === 0) return undefined
-        return array
-    }
+const getFCMTokens = async (uid : string, notifType: notificationType) : Promise<string [] | undefined> => {
+    const document = await fcmDataRef.doc(uid).get()
+    if (!document.exists) return undefined
+    const data = document.data()
+    if (!data) return undefined
+    const settings : notificationSettings = data.notificationPrefs;
+    if (!settings) return undefined
+    const tokenArray = data.tokens
+    if (tokenArray.length === 0) return undefined
+
+    //Now let's check the user prefs against the notification types
+    if (notifType.reason === 'mandatory') return tokenArray
+    if (notifType.reason === 'friendRequest' && settings.onNewFriendRequest) return tokenArray
+    if (notifType.reason === 'newFriend' && settings.onNewFriend) return tokenArray
+    if (notifType.reason === 'broadcastResponse' && settings.onNewBroadcastResponse) return tokenArray
+    if (notifType.reason === 'newBroadcast' && settings.onBroadcastFrom.includes(notifType.broadcastSender || "")) return tokenArray
+    if (notifType.reason === 'newGroup' && settings.onAddedToGroup) return tokenArray
+    return undefined
 }
 
 /**
@@ -223,11 +229,25 @@ const findUidForToken = (token : fcmToken, tokenDic : tokenDictionary) : string 
     return foundUid;
 }
 
+/**
+ * Creates an array of elements split into groups the length of size.
+ * @param array The array to split up
+ * @param size The max suze per chunk
+ */
+//chunkArray(['a', 'b', 'c', 'd'], 3) => [['a', 'b', 'c'], ['d']]
+const chunkArray = (array : any[], size : number) : any[] => {
+    return array.reduce((arr, item, idx) => {
+        return idx % size === 0
+          ? [...arr, [item]]
+          : [...arr.slice(0, -1), [...arr.slice(-1)[0], item]];
+      }, []);
+}
+
 export interface FCMRelatedPaths {
     tokenDocumentPath : string,
 }
 
 export const getFCMRelatedPaths = async (userUid : string) : Promise<FCMRelatedPaths> => {
-    const paths : FCMRelatedPaths = {tokenDocumentPath : `fcmTokenData/${userUid}`}
+    const paths : FCMRelatedPaths = {tokenDocumentPath : `fcmData/${userUid}`}
     return paths
 }
