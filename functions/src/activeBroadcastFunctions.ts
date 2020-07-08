@@ -6,6 +6,7 @@ import { isEmptyObject, truncate, handleError, successReport, errorReport } from
 
 export const MAX_LOCATION_NAME_LENGTH = 100
 export const MAX_BROADCAST_NOTE_LENGTH = 500
+const logger = functions.logger
 
 interface BroadcastCreationRequest {
     ownerUid: string,
@@ -225,7 +226,7 @@ export const autoDeleteBroadcast =
             res.sendStatus(200)
         }
         catch (error) {
-            console.error(error)
+            logger.error("autoDeleteBroadcast error", error)
             res.status(500).send(error)
         }
 })

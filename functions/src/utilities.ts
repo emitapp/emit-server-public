@@ -59,9 +59,10 @@ export function errorReport (
  */
 
 //Throwing the err also deallocates the server instance
+import {error} from "firebase-functions/lib/logger";
 export function handleError(err : any) : any {
     if (err.name){ //It's an Error() object
-        console.error(err)
+        error(err)
         const HttpsFunctionsErrorCodes = [
             'ok', 'cancelled', 'unknown', 'invalid-argument', 
             'deadline-exceeded', 'not-found', 'already-exists', 'permission-denied', 

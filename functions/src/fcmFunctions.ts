@@ -3,13 +3,15 @@ import admin = require('firebase-admin');
 import { objectDifference, errorReport, handleError, successReport } from './utilities';
 import {notificationSettings} from './accountManagementFunctions'
 
+
 const firestore = admin.firestore();
+const logger = functions.logger
 const fcmDataRef = firestore.collection("fcmData")
 type fcmToken = string;
 type tokenDictionary = { [key: string]: string []; }
 
 type notificationReason = "newBroadcast" | "broadcastResponse" | "newFriend" | "friendRequest" | "mandatory" | "newGroup"
-interface notificationType {
+export interface notificationType {
     reason: notificationReason
     broadcastSender?: string
 }
@@ -53,7 +55,7 @@ export const updateFCMTokenData = functions.https.onCall(
             await mainDocRef.update({tokens: admin.firestore.FieldValue.arrayUnion(data)})
             return successReport()
         }else{
-            console.warn(`User ${context.auth.token}'s FCM data can't be found in Firestore!`)
+            logger.warn("A User's FCM data can't be found in Firestore!", {uid: context.auth.uid})
             return errorReport("FCM data not in database")
         }
     }catch(err){
@@ -127,6 +129,49 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
     await sendFCMMessageToUsers(newMembersUids, message, {reason: 'newGroup'})
 })
 
+/**
+ * There are a number of configurations that notification objects must have to be seen
+ * in forground, background and quit states. This generates a properly configured one.
+ * Remember to fill in the tokens later
+ * @param expiresIn The notification's TTL in **seconds** (optional)
+ */
+//Exported for use in testing functions too
+//https://rnfirebase.io/messaging/usage#data-only-messages
+//https://developer.apple.com/documentation/usernotifications/setting_up_a_remote_notification_server/sending_notification_requests_to_apns/
+//https://firebase.google.com/docs/cloud-messaging/concept-options#delivery-options
+//https://firebase.google.com/docs/reference/admin/node/admin.messaging.MulticastMessage
+export const generateFCMMessageObject = (expiresIn: number | null = null) : admin.messaging.MulticastMessage => {
+    const message : admin.messaging.MulticastMessage = {
+        data: {}, //The meat of the notification
+
+        tokens: [], //Will be filled later by sendFCMMessageToUsers function
+
+        android:{
+            priority:"high" //Gives message priority to be seen in background and quit state
+        },
+      
+        apns: {
+            payload: {
+                aps: {
+                    contentAvailable: true //Gives message priority to be seen in background and quit state
+                }
+            },
+            headers: {
+                'apns-push-type': 'background', //Since notifications are handles locally by the client, no need to make this 'alert'
+                'apns-priority': '5', //Has to be 5 becuase of contentAvailable, though 10 would be ideal
+                'apns-topic': functions.config().env.fcm.app_bundle_id //your app bundle identfier
+            }
+        }
+    }
+
+    if (expiresIn){
+        //Useless if statements added because linter complaining about ts(2532) ('Possibly undefined')
+        //Typescript is a genius ._.
+        if (message.android) message.android.ttl = expiresIn * 1000
+        if (message.apns?.headers) message.apns.headers["apns-expiration"] = `${Math.floor(Date.now() / 1000) + expiresIn}`
+    }
+    return message
+}
 
 
 /**
@@ -138,7 +183,7 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
 //Being exported for use in testing functions
 export const sendFCMMessageToUsers = async (
     userUids : string[], 
-    bareMessage : admin.messaging.Message, 
+    bareMessage : admin.messaging.MulticastMessage, 
     notifType: notificationType) => {
     try{
         if (userUids.length === 0) return;
@@ -159,11 +204,16 @@ export const sendFCMMessageToUsers = async (
     
         //Now splitting the token array into chunks of 500 for sending
         //(since FCM multicasts can send a max of 500 messages per batch)
-        const tokenArrayChunks = chunkArray(allTokens, 2)
+        //(funnily enough, firestore batch writes can also perform up to 500 writes)
+        const tokenArrayChunks = chunkArray(allTokens, 500)
         const multicastPromises : Promise<any>[] = []
-    
+        //https://firebase.google.com/docs/cloud-messaging/send-message#admin
+        const trivialFcmErrors = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'] 
+
         const mulitcastPromise = async (tokens : fcmToken[]) => {
-            const response = await admin.messaging().sendMulticast({...bareMessage, tokens: tokens})
+            const copiedMessage : admin.messaging.MulticastMessage = JSON.parse(JSON.stringify(bareMessage))
+            copiedMessage.tokens = tokens
+            const response = await admin.messaging().sendMulticast(copiedMessage)
             //Remove any tokens that resulted in failure
             if (response.failureCount === 0) return;
             const batchDelete = firestore.batch();
@@ -172,10 +222,16 @@ export const sendFCMMessageToUsers = async (
                 const failedToken = tokens[index]
                 const uid = findUidForToken(failedToken, masterTokenDictionary)
                 if (!uid) return; //This shold never be the case but I'm doing this for type safety
+                //Delete the invalid token from firestore
                 batchDelete.update(
                     fcmDataRef.doc(uid), 
-                    {tokens: admin.firestore.FieldValue.arrayRemove(failedToken)})      
-                })
+                    {tokens: admin.firestore.FieldValue.arrayRemove(failedToken)}
+                )   
+                //Also take note of the error if it's not trivial:
+                if (!trivialFcmErrors.includes(resp.error?.code ?? "")){
+                    logger.warn(`FCM error: ${resp.error?.message}`, {fcmToken: failedToken, userUid: uid})
+                } 
+            })
             await batchDelete.commit()
         }
     
@@ -183,7 +239,7 @@ export const sendFCMMessageToUsers = async (
         await Promise.all(multicastPromises)
     }catch(err){
         //It's not that important, just console log for now
-        console.error(err)
+        logger.error(err)
     }
 }
 

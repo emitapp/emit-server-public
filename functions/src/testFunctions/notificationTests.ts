@@ -1,28 +1,30 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
 import {successReport, errorReport} from '../utilities'
-import {sendFCMMessageToUsers} from '../fcmFunctions'
+import {sendFCMMessageToUsers, generateFCMMessageObject, notificationType} from '../fcmFunctions'
 
 //Ensure this is false in prod
 const TEST_FUNCS_ENABLED = false;
+const logger = functions.logger
 
 interface TokenNotificationData {
     receiverToken: string,
-    messageObject: admin.messaging.Message
+    data: any
 }
 
 interface UidNotificationData {
     receiverUids: string[],
-    messageObject: admin.messaging.Message
+    data: any,
+    notifType: notificationType
 }
 
 const checkIfEnabled = () => {
     
     if (TEST_FUNCS_ENABLED){
-        console.warn("Testing function has been called!")
+        logger.info("__TEST__ function has been called!")
         return;
     } 
-    console.error("Some testing function is being accessed even though testing is diabled.")
+    logger.error("Someone attempted to access a test function even though testing is currently disabled.")
     throw errorReport('This function is only available for testing - it is disabled in production.');
 }
 
@@ -30,15 +32,20 @@ const checkIfEnabled = () => {
  * Sends a notificaion to a device using their specific FCM token
  */
 export const test_sendNotificationViaToken = functions.https.onCall(
-    async (data : TokenNotificationData, context) => {
+    async (params : TokenNotificationData, _) => {
     checkIfEnabled();
-    admin.messaging().send({...data.messageObject, token: data.receiverToken})
+    const bareMessage = generateFCMMessageObject()
+    bareMessage.data = params.data
+    delete bareMessage.tokens;
+    const message : admin.messaging.Message = {...bareMessage, token: params.receiverToken}
+    
+    admin.messaging().send(message)
         .then((response) => {
-            // Response is a message ID string.
-            console.log('Successfully sent message:', response);
+            // Response is am fcm messageID string.
+            logger.info('__TEST__:Successfully sent message:', response);
         })
         .catch((error) => {
-            console.log('Error sending message:', error);
+            logger.info('__TEST__: Error sending message:', error);
         });
     return successReport()
 });
@@ -48,8 +55,10 @@ export const test_sendNotificationViaToken = functions.https.onCall(
  * Sends a notificaion to a groups of users using their uids
  */
 export const test_sendNotificationViaUid = functions.https.onCall(
-    async (data : UidNotificationData, context) => {
+    async (params : UidNotificationData, _) => {
     checkIfEnabled();
-    await sendFCMMessageToUsers(data.receiverUids, data.messageObject, {reason: 'mandatory'})
+    const message = generateFCMMessageObject()
+    message.data = params.data
+    await sendFCMMessageToUsers(params.receiverUids, message, params.notifType)
     return successReport()
 });
