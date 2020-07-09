@@ -152,7 +152,7 @@ export const editGroup = functions.https.onCall(
         //Making sure noone is being demoted and prototed at the same time
         if (!isNullOrUndefined(data.usersToPromote) && !isNullOrUndefined(data.usersToDemote)){
             for (const key in data.usersToDemote) {
-                if ((<Object>data.usersToPromote).hasOwnProperty(key)) {
+                if (Object.prototype.hasOwnProperty.call(data.usersToPromote, key)) {
                     throw errorReport('Cannot promote and demote same user');     
                 }
             }
@@ -162,7 +162,7 @@ export const editGroup = functions.https.onCall(
             //Making sure noone is being promoted/demoted and removed at the same time
             const allRankChangeUsers = {...(data.usersToPromote || {}), ...(data.usersToDemote || {})}
             for (const uid in allRankChangeUsers) {
-                if ((<Object>data.usersToAdd).hasOwnProperty(uid)) {
+                if (Object.prototype.hasOwnProperty.call(data.usersToAdd, uid)) {
                     throw errorReport('Cannot promote/demote and remove same user');     
                 }
             }
@@ -274,7 +274,7 @@ const addMembers = async (data : groupEditRequest) => {
         (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
     
     //Making sure we don't re-add people who are already in the group
-    const newMembers = objectDifference(<object>data.usersToAdd, currentMembers)
+    const newMembers = objectDifference(<Record<string, boolean>>data.usersToAdd, currentMembers)
     const snippetAdditionPromise = async (uid : string) => {
         const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
         if (!snippetSnapshot.exists()){
@@ -303,7 +303,7 @@ const removeMembers = (data : groupEditRequest) => {
     return updates
 }
 
-const changeRank = async (data: groupEditRequest, newRank: groupRanks, checkIfUsersValid : boolean = true) => {
+const changeRank = async (data: groupEditRequest, newRank: groupRanks, checkIfUsersValid = true) => {
     const updates = {} as any
     const rankChangePromises = []
     const targetUsers = (newRank === groupRanks.ADMIN) ? data.usersToPromote : data.usersToDemote

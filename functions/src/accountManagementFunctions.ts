@@ -217,8 +217,8 @@ export const requestAllData = functions.https.onCall(
             throw errorReport("Authentication needed")
         }
       
-        let username : string = "<Username not provided>"
-        let displayName: string = "<Display name not provided>"
+        let username = "<Username not provided>"
+        let displayName = "<Display name not provided>"
         let userEmail: string | undefined = ""
     
         const allPaths = await getAllPaths(context.auth.uid)

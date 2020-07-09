@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions';
 //@google-cloud/tasks doesn’t yet support import syntax at time of writing
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { CloudTasksClient } = require('@google-cloud/tasks') 
 import admin = require('firebase-admin');
 import { isEmptyObject, truncate, handleError, successReport, errorReport } from './utilities';
@@ -173,7 +174,7 @@ export const createActiveBroadcast = functions.https.onCall(
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
-        const project = JSON.parse(process.env.FIREBASE_CONFIG!).projectId
+        const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
         const tasksClient = new CloudTasksClient()
         //queuePath is going to be a string that is the full path of the queue .
         const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, TASKS_QUEUE)

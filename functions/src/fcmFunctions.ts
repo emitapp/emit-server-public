@@ -3,7 +3,6 @@ import admin = require('firebase-admin');
 import { objectDifference, errorReport, handleError, successReport } from './utilities';
 import {notificationSettings} from './accountManagementFunctions'
 
-
 const firestore = admin.firestore();
 const logger = functions.logger
 const fcmDataRef = firestore.collection("fcmData")
@@ -98,7 +97,7 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
  * Sends an FCM message to users when they get a new active broadcast in their feed
  */
 export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
-.onCreate(async (snapshot, context) => {
+.onCreate(async (_, __) => {
     console.log("Imagine this does something!")
 })
 
@@ -184,7 +183,7 @@ export const generateFCMMessageObject = (expiresIn: number | null = null) : admi
 export const sendFCMMessageToUsers = async (
     userUids : string[], 
     bareMessage : admin.messaging.MulticastMessage, 
-    notifType: notificationType) => {
+    notifType: notificationType) : Promise<void> => {
     try{
         if (userUids.length === 0) return;
 
@@ -196,7 +195,7 @@ export const sendFCMMessageToUsers = async (
             const tokenArray = await getFCMTokens(uid, notifType)
             if (tokenArray){
                 masterTokenDictionary[uid] = tokenArray
-                allTokens.push.apply(allTokens, tokenArray)
+                allTokens.push(...tokenArray)
             } 
         } 
         userUids.forEach(uid => retreivalPromises.push(tokenRetrievalPromise(uid)));

@@ -2,6 +2,9 @@
 **/*.js
 **/*.js.map
 
+## Don't ignore eslinter config!
+!.eslintrc.js
+
 # Typescript v1 declaration files
 typings/
 

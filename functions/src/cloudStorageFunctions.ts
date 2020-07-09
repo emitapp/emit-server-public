@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import { DeleteFileResponse } from '@google-cloud/storage';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const path = require('path');
 
 // Creating our cloud client

@@ -46,7 +46,7 @@ export function successReport (message? : string) : ExecutionReport {
  * @param fatal Is this error fatal (ie should the server instance deallocate?)
  */
 export function errorReport (
-    message : string = "Something wrong happened; please try again!", 
+    message = "Something wrong happened; please try again!", 
     status : ErroneousStatus = ExecutionStatus.INVALID,
     fatal?: boolean) : ExecutionReport {
     return createReport(status, message, fatal)
@@ -60,6 +60,7 @@ export function errorReport (
 
 //Throwing the err also deallocates the server instance
 import {error} from "firebase-functions/lib/logger";
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function handleError(err : any) : any {
     if (err.name){ //It's an Error() object
         error(err)
@@ -94,16 +95,16 @@ export enum leaseStatus {
 /**
  * Determines if a value is null or undefined
  */
-export function isNullOrUndefined(value : any) : Boolean {
+export function isNullOrUndefined(value : unknown) : boolean {
     return (typeof value === "undefined") || value === null
 }
 
 /**
  * Determines if the entered object is empty
  */
-export function isEmptyObject (obj : {[key: string]: any}){
+export function isEmptyObject (obj : Record<string, unknown>) : boolean{
     for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
             return false;
         }
     }
@@ -114,7 +115,7 @@ export function isEmptyObject (obj : {[key: string]: any}){
  * Determines is a string is only whitespace
  * @param {string} str The stirng
  */
-export const isOnlyWhitespace = (str: string) => {
+export const isOnlyWhitespace = (str: string) : boolean => {
     return str.replace(/\s/g, '').length === 0
 }
   
@@ -122,19 +123,19 @@ export const isOnlyWhitespace = (str: string) => {
 /**
  * Truncates a string that surpasses a cetain max length and adds ellipses
  */
-export function truncate(inputString : string, maxLength : number) {
+export function truncate(inputString : string, maxLength : number) : string {
     if (inputString.length > maxLength)
        return inputString.substring(0,maxLength) + '...';
     else
        return inputString;
-};
+}
 
 /**
  * Returns an set of keys that are in A but not in B
  * @param objA Object A
  * @param objB Object B
  */
-export function objectDifference(objA : object, objB : object) : Set<any> {
+export function objectDifference(objA : Record<string, unknown>, objB : Record<string, unknown>) : Set<any> {
     const setA = new Set(Object.keys(objA))
     const setB = new Set(Object.keys(objB))
     return new Set([...setA].filter(x => !setB.has(x)))
@@ -143,7 +144,7 @@ export function objectDifference(objA : object, objB : object) : Set<any> {
 /**
  * Get s a random key from an object
  */
-export function randomKey (obj: object) {
+export function randomKey (obj: Record<string, unknown>) : string{
     const keys = Object.keys(obj);
     return keys[ keys.length * Math.random() << 0 ];
-};
+}
