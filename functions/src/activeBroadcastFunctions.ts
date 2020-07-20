@@ -30,7 +30,7 @@ interface DeletionTaskPayload {
     paths: { [key: string]: null }
 }
 
-interface CompleteRecepientList {
+export interface CompleteRecepientList {
     direct: { [key: string]: boolean; },
     groups: {[key: string]: RecepientGroupInfo}
 }
@@ -455,7 +455,7 @@ const generateRecepientObject =
 
 const isRealRecepient = (broadcastRecepients : CompleteRecepientList, uid : string) : boolean => {
     //First check the direct recepients
-    if (broadcastRecepients.direct[uid]) return true;
+    if (broadcastRecepients.direct && broadcastRecepients.direct[uid]) return true;
 
     //Now check the groups
     if (!broadcastRecepients.groups) return false;
