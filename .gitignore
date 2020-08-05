@@ -65,4 +65,5 @@ node_modules/
 .env
 
 #User added files
-env.json
+env.dev.json
+env.prod.json
