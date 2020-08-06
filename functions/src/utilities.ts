@@ -58,10 +58,11 @@ export function errorReport (
  * @param err The object
  */
 
-//Throwing the err also deallocates the server instance
+
 import {error} from "firebase-functions/lib/logger";
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function handleError(err : any) : any {
+    //Keep in mind that throwing errors also deallocates the server instance
     if (err.name){ //It's an Error() object
         error(err)
         const HttpsFunctionsErrorCodes = [
@@ -69,16 +70,16 @@ export function handleError(err : any) : any {
             'deadline-exceeded', 'not-found', 'already-exists', 'permission-denied', 
             'resource-exhausted', 'failed-precondition', 'aborted', 'out-of-range', 'unimplemented', 
             'internal', 'unavailable', 'data-loss', 'unauthenticated'];
-        if (HttpsFunctionsErrorCodes.includes(err.code || "")){
+        if (HttpsFunctionsErrorCodes.includes(err.code || "")){ //It's an https error
             throw err; 
-        }else{
+        }else{ //It's another type of error
             throw new HttpsError('unknown', "Something wrong happened! Please try again")
         }
     }else if (err.fatal){ //It's a fatal execution report
         const constructedError = new Error(err.message);
         constructedError.name = "fatal-error"
         throw constructedError;
-    }else{
+    }else{ //It's a non-fatal execution report
         return err
     }
 }

@@ -20,7 +20,7 @@ interface snippetCreationRequest{
     username:string
 }
 
-export interface notificationSettings {
+export interface NotificationSettings {
     onBroadcastFrom: Array<string>,
     onNewBroadcastResponse: boolean,
     onNewFriend: boolean,
@@ -137,7 +137,7 @@ export const updateDisplayName = functions.https.onCall(
 });
 
 export const updateNotificationPrefs = functions.https.onCall(
-    async (data : notificationSettings, context) => {
+    async (data : NotificationSettings, context) => {
     try{
         if (!context.auth) {
             throw errorReport("Authentication needed")

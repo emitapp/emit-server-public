@@ -1,26 +1,27 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
-import {successReport, errorReport} from '../utilities'
-import {sendFCMMessageToUsers, generateFCMMessageObject, notificationType} from '../fcmFunctions'
+import {successReport, errorReport, handleError} from '../utilities'
+import {
+    sendFCMMessageToUsers, 
+    generateFCMMessageObject, 
+    MulticastMessagePayload
+} from '../fcmFunctions'
 
-//Ensure this is false in prod
-const TEST_FUNCS_ENABLED = false;
 const logger = functions.logger
 
 interface TokenNotificationData {
     receiverToken: string,
-    data: any
+    data: MulticastMessagePayload
 }
 
 interface UidNotificationData {
     receiverUids: string[],
-    data: any,
-    notifType: notificationType
+    data: MulticastMessagePayload,
 }
 
 const checkIfEnabled = () => {
     
-    if (TEST_FUNCS_ENABLED){
+    if (process.env.FUNCTIONS_EMULATOR){
         logger.info("__TEST__ function has been called!")
         return;
     } 
@@ -33,21 +34,25 @@ const checkIfEnabled = () => {
  */
 export const test_sendNotificationViaToken = functions.https.onCall(
     async (params : TokenNotificationData, _) => {
-    checkIfEnabled();
-    const bareMessage = generateFCMMessageObject()
-    bareMessage.data = params.data
-    delete bareMessage.tokens;
-    const message : admin.messaging.Message = {...bareMessage, token: params.receiverToken}
-    
-    admin.messaging().send(message)
-        .then((response) => {
-            // Response is am fcm messageID string.
-            logger.info('__TEST__:Successfully sent message:', response);
-        })
-        .catch((error) => {
-            logger.info('__TEST__: Error sending message:', error);
-        });
-    return successReport()
+    try{
+        checkIfEnabled();
+        const bareMessage = generateFCMMessageObject()
+        bareMessage.data = params.data
+        delete bareMessage.tokens;
+        const message : admin.messaging.Message = {...bareMessage, token: params.receiverToken}
+        
+        admin.messaging().send(message)
+            .then((response) => {
+                // Response is am fcm messageID string.
+                logger.info('__TEST__:Successfully sent message:', response);
+            })
+            .catch((error) => {
+                logger.info('__TEST__: Error sending message:', error);
+            });
+        return successReport()
+    }catch(err){
+        return handleError(err)
+    }
 });
 
 
@@ -56,9 +61,13 @@ export const test_sendNotificationViaToken = functions.https.onCall(
  */
 export const test_sendNotificationViaUid = functions.https.onCall(
     async (params : UidNotificationData, _) => {
-    checkIfEnabled();
-    const message = generateFCMMessageObject()
-    message.data = params.data
-    await sendFCMMessageToUsers(params.receiverUids, message, params.notifType)
-    return successReport()
+    try{
+        checkIfEnabled();
+        const message  = generateFCMMessageObject()
+        message.data = params.data
+        await sendFCMMessageToUsers(params.receiverUids, message)
+        return successReport()    
+    }catch(err){
+        return handleError(err)
+    }
 });

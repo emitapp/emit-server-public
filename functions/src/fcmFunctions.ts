@@ -1,18 +1,25 @@
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
 import { objectDifference, errorReport, handleError, successReport } from './utilities';
-import {notificationSettings} from './accountManagementFunctions'
+import {NotificationSettings} from './accountManagementFunctions'
+import {CompleteRecepientList} from './activeBroadcastFunctions'
 
+const database = admin.database();
 const firestore = admin.firestore();
 const logger = functions.logger
 const fcmDataRef = firestore.collection("fcmData")
 type fcmToken = string;
 type tokenDictionary = { [key: string]: string []; }
 
-type notificationReason = "newBroadcast" | "broadcastResponse" | "newFriend" | "friendRequest" | "mandatory" | "newGroup"
-export interface notificationType {
-    reason: notificationReason
-    broadcastSender?: string
+type NotificationReason = "newBroadcast" | "broadcastResponse" | "newFriend" | "friendRequest" | "mandatory" | "newGroup" | "unset"
+
+export interface MulticastMessagePayload{
+    reason: NotificationReason
+    [x: string]: string 
+}
+
+export interface CreatedMulticastMessage extends admin.messaging.MulticastMessage {
+    data: MulticastMessagePayload
 }
 
 /**
@@ -67,38 +74,57 @@ export const updateFCMTokenData = functions.https.onCall(
  */
 export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{receiverUid}/inbox/{senderUid}')
 .onCreate(async (snapshot, context) => {
-    const message : any = {}
-    message.data = {}
-    message.data.type = 'new_friend_request'
-    message.data.title = `${snapshot.val().name} sent you a friend request!`
+    const message = generateFCMMessageObject()
+    message.data.reason = "friendRequest"
+    message.data.title = `${snapshot.val().displayName} sent you a friend request!`
     message.data.body = "Open Biteup to accept the friend request"
-    message.data.senderUid = context.params.senderUid
-    message.android = {}
-    message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message, {reason: 'friendRequest'})
+    message.data.causerUid = context.params.senderUid
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
 })
 
 /**
- * Sends an FCM message to users when they get a new friend request
+ * Sends an FCM message to users when they make a new friend
  */
 export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiverUid}/_masterSnippets/{newFriendUid}')
 .onCreate(async (snapshot, context) => {
-    const message : any = {}
-    message.data = {}
-    message.data.type = 'new_friend'
-    message.data.title = `${snapshot.val().name} is now your friend!`
-    message.data.newFriendUid = context.params.newFriendUid
-    message.android = {}
-    message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers([context.params.receiverUid], message, {reason: 'newFriend'})
+    const message = generateFCMMessageObject()
+    message.data.reason = "newFriend"
+    message.data.title = `${snapshot.val().displayName} is now your friend!`
+    message.data.causerUid = context.params.newFriendUid
+    await sendFCMMessageToUsers([context.params.receiverUid], message)
 })
 
 /**
  * Sends an FCM message to users when they get a new active broadcast in their feed
  */
-export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}')
-.onCreate(async (_, __) => {
-    console.log("Imagine this does something!")
+export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}/recepientUids')
+.onCreate(async (snapshot, context) => {
+    const recepientList : CompleteRecepientList = snapshot.val()
+    const fcmPromises : Promise<any>[] = []
+
+    const fcmToDirectRecepients = async () => {
+        const message = generateFCMMessageObject(600)
+        const senderDisplayName = (await database.ref(`/userSnippets/${context.params.broadcasterUid}`)
+            .once("value")).val()?.displayName
+        message.data.reason = 'newBroadcast'
+        message.data.title = `${senderDisplayName} made a broadcast!`
+        message.data.causerUid = context.params.broadcastUid
+        await sendFCMMessageToUsers(Object.keys(recepientList.direct), message)
+    }
+
+    const fcmToGroupRecepients = async (groupName: string, recepients: string[]) => {
+        const message = generateFCMMessageObject(600)
+        message.data.reason = 'newBroadcast'
+        message.data.title = `A member of ${groupName} has made a new broadcast!`
+        message.data.causerUid = context.params.broadcastUid
+        await sendFCMMessageToUsers(Object.keys(recepients), message)
+    }
+
+    fcmPromises.push(fcmToDirectRecepients())
+    for (const group of Object.values(recepientList.groups || {})) {
+        fcmPromises.push(fcmToGroupRecepients(group.groupName, Object.keys(group.members)))
+    }
+    await Promise.all(fcmPromises)
 })
 
 /**
@@ -106,8 +132,8 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
  */
 export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/memberUids')
 .onWrite(async (snapshot, context) => {
-    if (!snapshot.after.exists()) return;
-    const newMembersUids = [] as string[]
+    if (!snapshot.after.exists()) return; //The group was deleted
+    const newMembersUids : string[] = []
     if (snapshot.before.val()){
         newMembersUids.concat([...objectDifference(snapshot.after.val(), snapshot.before.val())])
     }else{
@@ -118,20 +144,31 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
         .ref(`/userGroups/${context.params.groupUid}/snippet/name`)
         .once("value")).val()
 
-    const message : any = {}
-    message.data = {}
-    message.data.type = 'new_group'
+    const message = generateFCMMessageObject()
+    message.data.reason = "newGroup"
     message.data.title = `You've been added to the ${groupName} group!`
-    message.data.newGroupUid = context.params.groupUid
-    message.android = {}
-    message.android.priority = "NORMAL"
-    await sendFCMMessageToUsers(newMembersUids, message, {reason: 'newGroup'})
+    message.data.causerUid = context.params.groupUid
+    await sendFCMMessageToUsers(newMembersUids, message)
 })
+
+/**
+ * Send an FCM message to a user when someone responds to one of ther broadcasts
+ */
+export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid}')
+.onCreate(async (snapshot, context) => {
+    const message = generateFCMMessageObject()
+    message.data.reason = 'broadcastResponse'
+    message.data.title = `${snapshot.val().displayName} has responded to one of your broadcasts!`
+    message.data.causerUid = context.params.newFriendUid
+    await sendFCMMessageToUsers([context.params.newResponderUid], message)
+})
+
 
 /**
  * There are a number of configurations that notification objects must have to be seen
  * in forground, background and quit states. This generates a properly configured one.
- * Remember to fill in the tokens later
+ * Remember to fill in the tokens later (usually done by sendFCMMessageToUsers) 
+ * and set the notification type deatils.
  * @param expiresIn The notification's TTL in **seconds** (optional)
  */
 //Exported for use in testing functions too
@@ -139,14 +176,18 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
 //https://developer.apple.com/documentation/usernotifications/setting_up_a_remote_notification_server/sending_notification_requests_to_apns/
 //https://firebase.google.com/docs/cloud-messaging/concept-options#delivery-options
 //https://firebase.google.com/docs/reference/admin/node/admin.messaging.MulticastMessage
-export const generateFCMMessageObject = (expiresIn: number | null = null) : admin.messaging.MulticastMessage => {
-    const message : admin.messaging.MulticastMessage = {
-        data: {}, //The meat of the notification
+export const generateFCMMessageObject = (expiresIn: number | null = null) : CreatedMulticastMessage => {
+    const message : CreatedMulticastMessage = {
+        data: {
+            //The meat of the notification, the rest of which will be filled in by the caller
+            reason: "unset",
+            causerUid: ""
+        },
 
         tokens: [], //Will be filled later by sendFCMMessageToUsers function
 
         android:{
-            priority:"high" //Gives message priority to be seen in background and quit state
+            priority: "high" //Gives message priority to be seen in background and quit state
         },
       
         apns: {
@@ -182,17 +223,17 @@ export const generateFCMMessageObject = (expiresIn: number | null = null) : admi
 //Being exported for use in testing functions
 export const sendFCMMessageToUsers = async (
     userUids : string[], 
-    bareMessage : admin.messaging.MulticastMessage, 
-    notifType: notificationType) : Promise<void> => {
+    bareMessage : CreatedMulticastMessage) : Promise<void> => {
     try{
         if (userUids.length === 0) return;
+        if (bareMessage.data.reason == 'unset') throw errorReport("Notification Reason Unset")
 
         //First, reading all the FCM tokens for each user from Firestore
         const masterTokenDictionary : tokenDictionary = {} 
         const retreivalPromises : Promise<any>[] = []
         const allTokens : fcmToken[] = []
         const tokenRetrievalPromise = async (uid : string) => {
-            const tokenArray = await getFCMTokens(uid, notifType)
+            const tokenArray = await getFCMTokens(uid, bareMessage)
             if (tokenArray){
                 masterTokenDictionary[uid] = tokenArray
                 allTokens.push(...tokenArray)
@@ -248,24 +289,26 @@ export const sendFCMMessageToUsers = async (
  * This function also takes the type of the notification into account, so it'll
  * also return undefined if the user's preferences wont allow that notification type to be sent
  * @param uid The uid of the user 
+ * @param message The message to be sent
  */
-const getFCMTokens = async (uid : string, notifType: notificationType) : Promise<string [] | undefined> => {
+const getFCMTokens = async (uid : string, message: CreatedMulticastMessage) : Promise<string [] | undefined> => {
     const document = await fcmDataRef.doc(uid).get()
     if (!document.exists) return undefined
     const data = document.data()
     if (!data) return undefined
-    const settings : notificationSettings = data.notificationPrefs;
+    const settings : NotificationSettings = data.notificationPrefs;
     if (!settings) return undefined
     const tokenArray = data.tokens
     if (tokenArray.length === 0) return undefined
 
-    //Now let's check the user prefs against the notification types
-    if (notifType.reason === 'mandatory') return tokenArray
-    if (notifType.reason === 'friendRequest' && settings.onNewFriendRequest) return tokenArray
-    if (notifType.reason === 'newFriend' && settings.onNewFriend) return tokenArray
-    if (notifType.reason === 'broadcastResponse' && settings.onNewBroadcastResponse) return tokenArray
-    if (notifType.reason === 'newBroadcast' && settings.onBroadcastFrom.includes(notifType.broadcastSender || "")) return tokenArray
-    if (notifType.reason === 'newGroup' && settings.onAddedToGroup) return tokenArray
+    //Now let's check the user prefs against the notification information
+    const {reason, causerUid: causalUserUid} = message.data
+    if (reason === 'mandatory') return tokenArray
+    if (reason === 'friendRequest' && settings.onNewFriendRequest) return tokenArray
+    if (reason === 'newFriend' && settings.onNewFriend) return tokenArray
+    if (reason === 'broadcastResponse' && settings.onNewBroadcastResponse) return tokenArray
+    if (reason === 'newBroadcast' && settings.onBroadcastFrom.includes(causalUserUid)) return tokenArray
+    if (reason === 'newGroup' && settings.onAddedToGroup) return tokenArray
     return undefined
 }
 

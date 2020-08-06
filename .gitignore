@@ -67,3 +67,5 @@ node_modules/
 #User added files
 env.dev.json
 env.prod.json
+#https://firebase.google.com/docs/functions/local-emulator#set_up_functions_configuration_optional
+functions/.runtimeconfig.json 
