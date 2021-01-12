@@ -1,5 +1,7 @@
 {
     "recommendations": [
-        "dbaeumer.vscode-eslint"
+        "toba.vsfire",
+        "dbaeumer.vscode-eslint",
+        "eamodio.gitlens"
     ]
 }
