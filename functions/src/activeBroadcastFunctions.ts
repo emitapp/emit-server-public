@@ -3,7 +3,7 @@ import * as functions from 'firebase-functions';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { CloudTasksClient } = require('@google-cloud/tasks') 
 import admin = require('firebase-admin');
-import { isEmptyObject, truncate, handleError, successReport, errorReport } from './utilities';
+import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from './utilities';
 
 export const MAX_LOCATION_NAME_LENGTH = 100
 export const MAX_BROADCAST_NOTE_LENGTH = 500
@@ -18,7 +18,6 @@ interface BroadcastCreationRequest {
     geolocation?: {latitude: number, longitude: number},
     note?: string,
 
-    autoConfirm: boolean,
     allFriends: boolean,
     maxResponders?: number,
     friendRecepients: { [key: string]: boolean; },
@@ -40,26 +39,18 @@ interface RecepientGroupInfo {
     members: { [key: string]: boolean; }
 }
 
-interface BroadcastResponseChange {
-    broadcasterUid: string,
-    broadcastUid: string
-    newStatuses: { [key: string]: responderStatuses }
+interface BroadcastConfrimationReq {
+    broadcastUid: string;
+    broadcasterUid: string
 }
 
-enum responderStatuses {
-    CONFIRMED = "Confirmed", //Note that this value is also mentioned in the security rules
-    IGNORED = "Ignored",
-    PENDING = "Pending"
-}
-
+const database = admin.database()
 const MIN_BROADCAST_WINDOW = 2 //2 minutes
 const MAX_BROADCAST_WINDOW = 2879 //48 hours - 1 minute
 const TASKS_LOCATION = functions.config().env.broadcastCreation.tasks_location
 const FUNCTIONS_LOCATION = functions.config().env.broadcastCreation.functions_location
 const TASKS_QUEUE = functions.config().env.broadcastCreation.autodelete_task_queue_name
 const serviceAccountEmail = functions.config().env.broadcastCreation.service_account_email;
-
-const database = admin.database()
 
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
@@ -83,6 +74,7 @@ export const createActiveBroadcast = functions.https.onCall(
         }else{
             lifeTime = (data.deathTimestamp - Date.now()) / (60000)
         }
+
         if (isNaN(lifeTime) || lifeTime > MAX_BROADCAST_WINDOW || lifeTime < MIN_BROADCAST_WINDOW){
             throw errorReport(`Your broadcast should die between ${MIN_BROADCAST_WINDOW}`
                 + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
@@ -129,6 +121,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         const allRecepients = await generateRecepientObject(data, context.auth.uid)
 
+        //Now populating people's feeds
         //The way we're doing this, broadcasts sent via groups will overwrite
         //broadcasts sent via direct uids or masks (if someone got a broadcast via both)
         for (const friendUid in allRecepients.direct) {
@@ -148,34 +141,34 @@ export const createActiveBroadcast = functions.https.onCall(
         //public (/public) data (the owner can write, everyone can read)
         //and responder (/responders) data (which can be a bit large, which is 
         //why it is its own section to be loaded only when needed)
+        //Note that none of these is the object that's going into people's feeds
 
         const broadcastPublicData = {
             deathTimestamp: data.deathTimestamp, 
             location: data.location,
             ...(data.geolocation ? { geolocation: data.geolocation } : {}),
-            autoConfirm: data.autoConfirm,
             ...(data.note ? { note: data.note } : {}),
             totalConfirmations: 0,
-            pendingResponses: 0
         }
 
         const broadcastPrivateData = {
             cancellationTaskPath: "",
             recepientUids: allRecepients,
-            totalResponses: 0,
-            responseCap: data.maxResponders || null
+            confirmationCap: data.maxResponders || null
         }
 
         updates[userBroadcastSection + "/public/" + newBroadcastUid] = broadcastPublicData
         nulledPaths[userBroadcastSection + "/public/" + newBroadcastUid] = null
         updates[userBroadcastSection + "/private/" + newBroadcastUid] = broadcastPrivateData
         nulledPaths[userBroadcastSection + "/private/" + newBroadcastUid] = null
+
         //responders section starts off empty
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
         const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
         const tasksClient = new CloudTasksClient()
+
         //queuePath is going to be a string that is the full path of the queue .
         const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, TASKS_QUEUE)
 
@@ -183,7 +176,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         const payload: DeletionTaskPayload = { paths: nulledPaths}
 
-        //Now making the task itself
+        //Now making the task itself (its an HTTPS request)
         const task = {
             httpRequest: {
               httpMethod: 'POST',
@@ -204,10 +197,10 @@ export const createActiveBroadcast = functions.https.onCall(
 
         //Finally actaully enqueueing the deletion task
         const [ response ] = await tasksClient.createTask({ parent: queuePath, task })
+        //Then giving the broadcast it's deletion task's id (in case we want to cancel the scheduled deletion or something)
+        updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
 
         //And lastly, doing the batch writes
-        //First giving the main broadcast it's deletion task's id
-        updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
         await database.ref().update(updates);
         return successReport()
     }catch(err){
@@ -237,116 +230,52 @@ export const autoDeleteBroadcast =
  * to a broadcast in their feed
  */
 export const setBroadcastResponse = functions.https.onCall(
-    async (data: BroadcastResponseChange, context) => {
+    async (data: BroadcastConfrimationReq, context) => {
     try{
         if (!context.auth) {
             throw errorReport("Authentication Needed")
-        } 
+        }
 
-        if (isEmptyObject(data.newStatuses)){
-            throw errorReport('No new statuses to change');
+        const uid = context.auth.uid;
+
+        if (isOnlyWhitespace(data.broadcastUid)){
+            throw errorReport('Invalid broadcast uid');
         }
 
         const broadcastRecepients = 
         (await database
         .ref(`activeBroadcasts/${data.broadcasterUid}/private/${data.broadcastUid}/recepientUids`)
-        .once('value'))
-        .val()
-
+        .once('value')).val()
         if (broadcastRecepients === null){
-            throw errorReport('Broadcast doesn\'t exist');
+            throw errorReport('This broadcast doesn\'t exist.');
         }
 
-        const autoConfirm = 
-        (await database
-        .ref(`activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/autoConfirm`)
-        .once('value'))
-        .val()
+        const responderSnippetSnapshot = await database.ref(`userSnippets/${uid}`).once('value');
+        if (!responderSnippetSnapshot.exists()){
+            throw errorReport(`Your account isn't set up yet`);
+        }
 
+        if (!isBroadcastRecepient(broadcastRecepients, uid)){
+            throw errorReport('Responder was never a recepient');
+        }
 
-        //Now that we've done all the crtitcal error checks, getting ready to process all the changes
-        //simultaneously
-        const updates : { [key: string]: responderStatuses } = {}
-        const responseChangePromises : Array<Promise<void>> = []
-
-        const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)
-        const pendingCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/pendingResponses`)
-        const deltas = {confirmations: 0, pending: 0}
-
-        const writePromise = async (key: string) => {
-            const newStatus = data.newStatuses[key]
-
-            if (!isRealRecepient(broadcastRecepients, key)){
-                throw errorReport('Responder was never a recepient');
-            }
-
-            if (!context.auth 
-                || (context.auth.uid !== data.broadcasterUid && context.auth.uid !== key)){
-                throw errorReport('You don\'t have the the permission to change this user\'s status');
-            }
-
-            //We should also make sure that if the broadcast wasn't auto-confirm
-            //then only the broadcaster can set people to confirmed
-            if (!autoConfirm && context.auth.uid !== data.broadcasterUid && newStatus === responderStatuses.CONFIRMED){
-                throw errorReport('Only the owner of manual confirm broacasts can confirm responders');
-            }
-
-            //Now we're first going to check if this user still exists
-            const responderSnippet = (await database
-            .ref(`userSnippets/${key}`)
-            .once('value'))
-            .val()
-
-            if (!responderSnippet){
-                throw errorReport(`Owner snapshot missing - user has probably deleted their account`);
-            }
-            
-            //Then we're going to nake note of thier change in status to change some 
-            //counters.
-            const responderSnippetPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${key}`
-            const responderResponseSnippet = (await database
-            .ref(responderSnippetPath)
-            .once('value'))
-            .val()
-
-            recordResponseDeltas(
-                responderResponseSnippet ? responderResponseSnippet.status : null,
-                newStatus,
-                deltas)
-
-            //We could have also constructed this using responderResponseSnippet
-            //but I used the responderSnippet because there's chance to update some 
-            //things that the responder might have changed since they responded
-            //(like maybe their display name).
-            const newValue = {...responderSnippet, status: newStatus}
-            updates[responderSnippetPath] = newValue
-
-            //Also making sure this reflects on the responder's feed
-            //If people are being ignored, then only signal "pending" on thier feed
-            if (newStatus === responderStatuses.IGNORED){
-                updates[`feeds/${key}/${data.broadcastUid}/status`] = responderStatuses.PENDING
-            }else{
-                updates[`feeds/${key}/${data.broadcastUid}/status`] = newStatus        
-            }
-        } 
-
-        Object.keys(data.newStatuses).forEach(key => {   
-            responseChangePromises.push(writePromise(key))  
-        });
-
-
-        await Promise.all(responseChangePromises)
-        await Promise.all([
-            pendingCounterRef.transaction(count => count + deltas.pending),
-            confirmCounterRef.transaction(count => count + deltas.confirmations)
-        ])
+        const updates : any = {}
+        updates[`activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${uid}`] = responderSnippetSnapshot.val()
+        updates[`feeds/${uid}/${data.broadcastUid}/status`] = "confirmed"  //Also making sure this reflects on the responder's feed
         await database.ref().update(updates);
+
+        //Incrementing the response counter now
+        const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
+        confirmCounterRef.transaction(count => count + 1)
         return successReport()
     }catch(err){
         return handleError(err)
     }
 })
 
+// This assumes that 
+// /activeBroadcasts/${broadcasterUid}/public/${broadcastUid}/totalConfirmations and 
+// /activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid} are updated at the same time
 export const lockBroadcastIfNeeded = functions.database.ref('activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid}')
 .onCreate(async (_, context) => {
 
@@ -354,17 +283,15 @@ export const lockBroadcastIfNeeded = functions.database.ref('activeBroadcasts/{b
     const updates = {} as any
     updates[`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids/${newResponderUid}`] = true
 
-    const totalResponseCountRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/totalResponses`)
-    let totalCount = 0
-    await totalResponseCountRef.transaction(count => {
-        totalCount = count + 1
-        return totalCount
-    });
+    const confirmationCap = (await 
+        database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/confirmationCap`).once("value"))
+        .val()
+    
+    const currentConfirmationCount = (await 
+        database.ref(`/activeBroadcasts/${broadcasterUid}/public/${broadcastUid}/totalConfirmations`).once("value"))
+        .val()
 
-    const responseCapRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responseCap`)
-    const responseCap = (await responseCapRef.once("value")).val()
-
-    if (responseCap && totalCount >= responseCap){ //Time to lock down the broadcast. Delete it from every non-responder's feed
+    if (confirmationCap && currentConfirmationCount >= confirmationCap){ //Time to lock down the broadcast. Delete it from every non-responder's feed
         const responderUidsRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids`)
         const responderUids = {...(await responderUidsRef.once("value")).val()}
         responderUids[newResponderUid] = true //Adding this new responder to the calulcation (since he isn't in the server's record yet)
@@ -453,7 +380,7 @@ const generateRecepientObject =
     return allRecepients;
 }
 
-const isRealRecepient = (broadcastRecepients : CompleteRecepientList, uid : string) : boolean => {
+const isBroadcastRecepient = (broadcastRecepients : CompleteRecepientList, uid : string) : boolean => {
     //First check the direct recepients
     if (broadcastRecepients.direct && broadcastRecepients.direct[uid]) return true;
 
@@ -463,34 +390,6 @@ const isRealRecepient = (broadcastRecepients : CompleteRecepientList, uid : stri
         if (group.members[uid]) return true
     }
     return false;
-}
-
-/**
- * This is used by setBroadcastResponse to keep track of changes in responses
- * So that it can reflect those changes in some counters
- * @param before The status before the change
- * @param after The status after the chance
- * @param deltaObject The object that is accumulating these delta
- */
-//I didn't make this a trigger becase it would cause problems
-//(it would me makign changes based off response auto-deletions as well)
-const recordResponseDeltas = (before: string, after: string, deltaObject: any) => {
-
-    if (before === after) return;
-    
-    if (before === responderStatuses.CONFIRMED){
-        //Recrement count if we've lost a confirmation
-        deltaObject.confirmations--;
-    }else if (after === responderStatuses.CONFIRMED){
-         //Increment count if we have a new confirmation
-        deltaObject.confirmations++;
-    }
-
-    if (before === responderStatuses.PENDING){
-        deltaObject.pending--;
-    }else if (after === responderStatuses.PENDING){
-        deltaObject.pending++;
-    }
 }
 
 //Gets paths to all the active braodcast data related to the user
