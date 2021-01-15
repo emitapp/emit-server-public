@@ -2,6 +2,7 @@
     "recommendations": [
         "toba.vsfire",
         "dbaeumer.vscode-eslint",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "gruntfuggly.todo-tree"
     ]
 }
