@@ -1,3 +1,4 @@
+//TODO: Purge masks from this file (and the other files that link to it)
 import * as functions from 'firebase-functions';
 //@google-cloud/tasks doesn’t yet support import syntax at time of writing
 // eslint-disable-next-line @typescript-eslint/no-var-requires
