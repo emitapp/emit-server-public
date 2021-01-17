@@ -3,8 +3,8 @@
     //Uncomment these for dev if needed
     //Be sure to comment them again for producion
     //The syntax of RTDB rules would allow these two commands to override all the other rules
-    //".read": true,
-    //".write": true,
+    ".read": true,
+    ".write": true,
 
 
     //Everyone can read, noone can write (only cloud functions can write)
