@@ -288,25 +288,18 @@ export const setBroadcastResponse = functions.https.onCall(
             } else {
                 throw errorReport('Responder has not confirmed yet')
             }
-            functions.logger.log("Hello2");
-
-
             const responderSnap = await responderRef.once("value")
             if (responderSnap.exists()) {
                 await responderRef.remove()
             } else {
                 throw errorReport('Responder has not confirmed yet')
             }
-            functions.logger.log("Hello3");
-
             // Decrementing the response counter now
             const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
             confirmCounterRef.transaction(count => count - 1)
-            functions.logger.log("Hello4");
         }
         return successReport()
     } catch(err) {
-        functions.logger.log(err);
         return handleError(err)
     }
 })
