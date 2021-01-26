@@ -40,9 +40,10 @@ interface RecepientGroupInfo {
     members: { [key: string]: boolean; }
 }
 
-interface BroadcastConfrimationReq {
-    broadcastUid: string;
-    broadcasterUid: string
+interface BroadcastConfirmationReq {
+    broadcastUid: string,
+    broadcasterUid: string,
+    attendOrRemove: boolean
 }
 
 const database = admin.database()
@@ -231,7 +232,8 @@ export const autoDeleteBroadcast =
  * to a broadcast in their feed
  */
 export const setBroadcastResponse = functions.https.onCall(
-    async (data: BroadcastConfrimationReq, context) => {
+    async (data: BroadcastConfirmationReq, context) => {
+
     try{
         if (!context.auth) {
             throw errorReport("Authentication Needed")
@@ -260,16 +262,45 @@ export const setBroadcastResponse = functions.https.onCall(
             throw errorReport('Responder was never a recepient');
         }
 
-        const updates : any = {}
-        updates[`activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${uid}`] = responderSnippetSnapshot.val()
-        updates[`feeds/${uid}/${data.broadcastUid}/status`] = "confirmed"  //Also making sure this reflects on the responder's feed
-        await database.ref().update(updates);
+        const respondersPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${uid}`
+        const statusPath = `feeds/${uid}/${data.broadcastUid}/status`
 
-        //Incrementing the response counter now
-        const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
-        confirmCounterRef.transaction(count => count + 1)
+        // if attendOrRemove param is not passed in (to account for old code not using this)
+        // or it's true, confirm the user for the event
+        const updates : any = {}
+        if (data.attendOrRemove) { 
+            updates[respondersPath] = responderSnippetSnapshot.val()
+            updates[statusPath] = "confirmed"  // Also making sure this reflects on the responder's feed
+            await database.ref().update(updates);
+    
+            // Incrementing the response counter now
+            const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
+            await confirmCounterRef.transaction(count => count + 1)
+            
+        // otherwise, if it's false, cancel the user for the event
+        } else {
+            const statusRef = database.ref(statusPath)
+            const statusSnap = await statusRef.once("value")
+            const responderRef = database.ref(respondersPath)
+
+            if (!statusSnap.exists() || statusSnap.val() != "confirmed") {
+                throw errorReport('Responder has not confirmed yet')
+            }
+            const responderSnap = await responderRef.once("value")
+            if (!responderSnap.exists()) {
+                throw errorReport('Responder has not confirmed yet')
+            }
+
+            updates[statusPath] = "cancelled"
+            await statusRef.update(updates);
+            await responderRef.remove()
+
+            // Decrementing the response counter now
+            const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
+            await confirmCounterRef.transaction(count => count - 1)
+        }
         return successReport()
-    }catch(err){
+    } catch(err) {
         return handleError(err)
     }
 })
