@@ -275,28 +275,29 @@ export const setBroadcastResponse = functions.https.onCall(
     
             // Incrementing the response counter now
             const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
-            confirmCounterRef.transaction(count => count + 1)
+            await confirmCounterRef.transaction(count => count + 1)
             
         // otherwise, if it's false, cancel the user for the event
         } else {
             const statusRef = database.ref(statusPath)
-            const responderRef = database.ref(respondersPath)
             const statusSnap = await statusRef.once("value")
-            updates[statusPath] = "cancelled"
-            if (statusSnap.exists() && statusSnap.val() == "confirmed") {
-                await statusRef.update(updates);
-            } else {
-                throw errorReport('Responder has not confirmed yet')
-            }
+            const responderRef = database.ref(respondersPath)
             const responderSnap = await responderRef.once("value")
-            if (responderSnap.exists()) {
-                await responderRef.remove()
-            } else {
+
+            if (!statusSnap.exists() || statusSnap.val() != "confirmed") {
                 throw errorReport('Responder has not confirmed yet')
             }
+            if (!responderSnap.exists()) {
+                throw errorReport('Responder has not confirmed yet')
+            }
+
+            updates[statusPath] = "cancelled"
+            updates[respondersPath] = null // multipath deletion
+            await statusRef.update(updates);
+
             // Decrementing the response counter now
             const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
-            confirmCounterRef.transaction(count => count - 1)
+            await confirmCounterRef.transaction(count => count - 1)
         }
         return successReport()
     } catch(err) {
