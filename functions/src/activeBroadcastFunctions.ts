@@ -282,18 +282,18 @@ export const setBroadcastResponse = functions.https.onCall(
             const statusRef = database.ref(statusPath)
             const statusSnap = await statusRef.once("value")
             const responderRef = database.ref(respondersPath)
-            const responderSnap = await responderRef.once("value")
 
             if (!statusSnap.exists() || statusSnap.val() != "confirmed") {
                 throw errorReport('Responder has not confirmed yet')
             }
+            const responderSnap = await responderRef.once("value")
             if (!responderSnap.exists()) {
                 throw errorReport('Responder has not confirmed yet')
             }
 
             updates[statusPath] = "cancelled"
-            updates[respondersPath] = null // multipath deletion
             await statusRef.update(updates);
+            await responderRef.remove()
 
             // Decrementing the response counter now
             const confirmCounterRef = database.ref(`/activeBroadcasts/${data.broadcasterUid}/public/${data.broadcastUid}/totalConfirmations`)      
