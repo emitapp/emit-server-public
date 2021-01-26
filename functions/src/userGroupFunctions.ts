@@ -104,6 +104,7 @@ export const createGroup = functions.https.onCall(
       //The member count and admin count is handled by a trigger cloud function
       updates[`${groupMasterPath}/snippet`] = {
         name: data.name,
+        nameQuery: data.name.toLocaleLowerCase(),
         leaseTime: Date.now(),
         lastEditId: database.ref().push().key
       }
@@ -349,11 +350,12 @@ const updateGroupName = async (data: groupEditRequest) => {
   const currentMembers =
     (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
 
-  for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
-    updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name: data.newName }
-  }
-  updates[`/userGroups/${data.groupUid}/memberUids`] = { name: data.newName }
-  return updates
+
+    for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
+        updates[`userGroupMemberships/${uid}/${data.groupUid}`] = {name: data.newName, nameQuery: data.newName?.toLocaleLowerCase()}
+    }
+    updates[`/userGroups/${data.groupUid}/memberUids`] = {name: data.newName, nameQuery: data.newName?.toLocaleLowerCase()}
+    return updates
 }
 
 /**

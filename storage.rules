@@ -1,6 +1,8 @@
 rules_version = '2';
 service firebase.storage {
  match /b/{bucket}/o {
+
+   //For Profile Pics
    match /profilePictures {
 
      // Cascade read to any image at the profilePictures path
@@ -23,5 +25,31 @@ service firebase.storage {
       }
      }
    }
+
+   //For group pics
+    match /groupPictures {
+
+    match /{allImages=**} {
+      allow read: if request.auth!=null
+    }
+
+    // Allow write files to the path "profilePictures/{groupUid}/*", subject to the constraints:
+    // 1) File is less than 10MB
+    // 2) Content type is an image
+    // 3) File name is less than 50 characters
+    // 4) They are logged in
+    //TODO: Make it so that only memebrs can chnage it!
+    //https://stackoverflow.com/questions/46861983/can-firebase-cloud-storage-rules-validate-against-firestore-data
+    //https://firebase.google.com/docs/storage/security/rules-conditions?hl=UK
+    match /{groupUid} {
+      match /{imageId} {
+        allow write: if request.resource.size < 10 * 1024 * 1024
+                      && request.resource.contentType.matches('image/.*')
+                      && imageId.size() < 50
+                      && request.auth!=null
+      }
+    }
+  }
+
  }
 }

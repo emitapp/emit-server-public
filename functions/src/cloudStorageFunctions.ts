@@ -8,7 +8,8 @@ const path = require('path');
 const bucket = admin.storage().bucket()
 
 /**
- * This function deletes a user's older profile pic after a new one is uploaded
+ * This function deletes a user's older profile pic (or a group's older pic)
+ * after a new one is uploaded
  * It is only listeneing for pictures created by the image resizer
  */
 export const deleteOlderProfilePic = functions.storage.object().onFinalize(async (object) => {
