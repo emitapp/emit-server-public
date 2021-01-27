@@ -298,7 +298,7 @@ export const setBroadcastResponse = functions.https.onCall(
             }
 
             updates[statusPath] = "cancelled"
-            await statusRef.update(updates);
+            await database.ref().update(updates);
             await responderRef.remove()
 
             // Decrementing the response counter now
