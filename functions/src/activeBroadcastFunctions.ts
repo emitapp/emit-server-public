@@ -138,11 +138,14 @@ export const createActiveBroadcast = functions.https.onCall(
             }
         }
 
-        //Active broadcasts are split into 3 sections
+        //Active broadcasts are split into 4 sections
         //private (/private) data (only the server should really read and write)
         //public (/public) data (the owner can write, everyone can read)
         //and responder (/responders) data (which can be a bit large, which is 
         //why it is its own section to be loaded only when needed)
+        //chat (/chat), which contains the chat associated with the broadcast
+        //TODO: move chat to a separate database later on
+        //TODO: add in some security rules for chat
         //Note that none of these is the object that's going into people's feeds
 
         const broadcastPublicData = {
@@ -166,6 +169,9 @@ export const createActiveBroadcast = functions.https.onCall(
 
         //responders section starts off empty
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
+
+        //Chat section also starts off empty
+        nulledPaths[userBroadcastSection + "/chat/" + newBroadcastUid] = null
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
         const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
