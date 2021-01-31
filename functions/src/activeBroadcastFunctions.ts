@@ -12,10 +12,14 @@ const logger = functions.logger
 
 interface BroadcastCreationRequest {
     ownerUid: string,
-    location: string,
-    deathTimestamp: number,
-    timeStampRelative: boolean, //Eg: In 5 minutes vs at 12:35am
 
+    activity: string,
+    emoji: string,
+    startingTime: number, //Eg: In 5 minutes vs at 12:35am
+    startingTimeRelative: boolean,
+    duration: number,
+
+    location?: string,
     geolocation?: {latitude: number, longitude: number},
     note?: string,
 
@@ -47,8 +51,7 @@ interface BroadcastConfirmationReq {
 }
 
 const database = admin.database()
-const MIN_BROADCAST_WINDOW = 2 //2 minutes
-const MAX_BROADCAST_WINDOW = 2879 //48 hours - 1 minute
+const FLARE_LIFETIME_CAP_MINS = 2879 //48 hours - 1 minute
 const TASKS_LOCATION = functions.config().env.broadcastCreation.tasks_location
 const FUNCTIONS_LOCATION = functions.config().env.broadcastCreation.functions_location
 const TASKS_QUEUE = functions.config().env.broadcastCreation.autodelete_task_queue_name
@@ -69,17 +72,24 @@ export const createActiveBroadcast = functions.https.onCall(
             throw errorReport('Your auth token doens\'t match');
         }   
 
-        let lifeTime = 0; //In minutes
-        if (data.timeStampRelative){
-            lifeTime = data.deathTimestamp / 60000
-            data.deathTimestamp += Date.now() //Now making it absolute
-        }else{
-            lifeTime = (data.deathTimestamp - Date.now()) / (60000)
+        if (!data.duration){
+            throw errorReport("Invalid duration");
         }
 
-        if (isNaN(lifeTime) || lifeTime > MAX_BROADCAST_WINDOW || lifeTime < MIN_BROADCAST_WINDOW){
-            throw errorReport(`Your broadcast should die between ${MIN_BROADCAST_WINDOW}`
-                + ` and ${MAX_BROADCAST_WINDOW} minutes from now`);
+        if (!data.emoji || !data.activity){
+            throw errorReport(`Invalid activity`);
+        }
+
+        let deathTime = 0; //In milliseconds
+        if (data.startingTimeRelative) deathTime += Date.now() + data.startingTime;
+        else if (data.startingTime < Date.now()) deathTime = Date.now(); //And flare set to start "in the past" for any reason starts now
+        else deathTime = data.startingTime;
+
+        const absoluteStartingTime = deathTime
+        deathTime += data.duration;
+
+        if (isNaN(deathTime) || deathTime > (Date.now() + FLARE_LIFETIME_CAP_MINS * 60000)){
+            throw errorReport(`Your flare can't last for more than 48 hours`);
         }
 
         if (data.maxResponders && !Number.isInteger(data.maxResponders)){
@@ -97,7 +107,7 @@ export const createActiveBroadcast = functions.https.onCall(
             throw errorReport(`Broadcast note too long`);
         }
 
-        if (data.location.length > MAX_LOCATION_NAME_LENGTH){
+        if (data.location && data.location.length > MAX_LOCATION_NAME_LENGTH){
             throw errorReport(`Broadcast location name too long`);
         }
 
@@ -115,8 +125,12 @@ export const createActiveBroadcast = functions.https.onCall(
         //Making the object that will actually be in people's feeds
         const feedBroadcastObject : any = {
             owner: {uid: data.ownerUid, ...ownerSnippetSnapshot.val()},
-            deathTimestamp: data.deathTimestamp, 
-            location: data.location,
+            deathTimestamp: deathTime, 
+            duration: data.duration,
+            startingTime: absoluteStartingTime,
+            activity: data.activity,
+            emoji: data.emoji,
+            ...(data.location ? { location: data.location } : {}),
             ...(data.note ? { note: truncate(data.note, 50) } : {})
         }
         if (data.geolocation) feedBroadcastObject.geolocation = data.geolocation
@@ -130,6 +144,7 @@ export const createActiveBroadcast = functions.https.onCall(
             updates[`feeds/${friendUid}/${newBroadcastUid}`] = feedBroadcastObject
             nulledPaths[`feeds/${friendUid}/${newBroadcastUid}`] = null
         }
+
         for (const groupUid in allRecepients.groups) {
             const groupInfo = {name: allRecepients.groups[groupUid].groupName, uid: groupUid}
             for (const memberUid in allRecepients.groups[groupUid].members) {
@@ -148,10 +163,9 @@ export const createActiveBroadcast = functions.https.onCall(
         //TODO: add in some security rules for chat
         //Note that none of these is the object that's going into people's feeds
 
+        //Identical to the feed object but it has the full note and a responder counter
         const broadcastPublicData = {
-            deathTimestamp: data.deathTimestamp, 
-            location: data.location,
-            ...(data.geolocation ? { geolocation: data.geolocation } : {}),
+            ...feedBroadcastObject,
             ...(data.note ? { note: data.note } : {}),
             totalConfirmations: 0,
         }
@@ -199,7 +213,7 @@ export const createActiveBroadcast = functions.https.onCall(
               },
             },
             scheduleTime: {
-              seconds: data.deathTimestamp / 1000 //in epoch seconds
+              seconds: deathTime / 1000 //in epoch seconds
             }
         }
 
