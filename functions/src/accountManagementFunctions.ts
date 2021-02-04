@@ -93,7 +93,8 @@ export const createSnippet = functions.https.onCall(
                 onNewBroadcastResponse: true,
                 onNewFriend: true,
                 onNewFriendRequest: true,
-                onAddedToGroup: true
+                onAddedToGroup: true,
+                onChat: true
             },
             tokens: []
         });
