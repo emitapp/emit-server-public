@@ -25,7 +25,13 @@ export interface NotificationSettings {
     onNewBroadcastResponse: boolean,
     onNewFriend: boolean,
     onNewFriendRequest: boolean,
-    onAddedToGroup: boolean
+    onAddedToGroup: boolean,
+    onChat: boolean
+}
+
+export interface AddFlareNotifRequest {
+    onBroadcastFrom: string, //sender uid
+    addUser: boolean //true of the user should be added, false if should be removed
 }
 
 export const createSnippet = functions.https.onCall(
@@ -136,6 +142,30 @@ export const updateDisplayName = functions.https.onCall(
     }  
 });
 
+export const changeFlareSubscription = functions.https.onCall(
+    async (data : AddFlareNotifRequest, context) => {
+        try {
+            if (!context.auth) {
+                throw errorReport("Authentication needed")
+            }            
+
+            if (typeof data.onBroadcastFrom !== 'string'
+            || typeof data.addUser !== 'boolean'){
+                    throw errorReport("Invalid arguments")
+            }
+
+            await fcmDataRef.doc(context.auth.uid).update({
+                "notificationPrefs.onBroadcastFrom": data.addUser ? 
+                    admin.firestore.FieldValue.arrayUnion(data.onBroadcastFrom) :
+                    admin.firestore.FieldValue.arrayRemove(data.onBroadcastFrom)     
+            });
+
+            return successReport()
+        } catch(err) {
+        return handleError(err)
+    }  
+});
+
 export const updateNotificationPrefs = functions.https.onCall(
     async (data : NotificationSettings, context) => {
     try{
@@ -146,7 +176,8 @@ export const updateNotificationPrefs = functions.https.onCall(
         if (typeof data.onAddedToGroup !== 'boolean'
             || typeof data.onNewBroadcastResponse !== 'boolean'
             || typeof data.onNewFriend !== 'boolean'
-            || typeof data.onNewFriendRequest !== 'boolean'){
+            || typeof data.onNewFriendRequest !== 'boolean'
+            || typeof data.onChat !== 'boolean'){
             throw errorReport("Invalid Arguments")
         }
 
@@ -167,8 +198,9 @@ export const updateNotificationPrefs = functions.https.onCall(
                 onNewBroadcastResponse: data.onNewBroadcastResponse,
                 onNewFriend: data.onNewFriend,
                 onNewFriendRequest: data.onNewFriendRequest,
-                onAddedToGroup: data.onAddedToGroup
-            }
+                onAddedToGroup: data.onAddedToGroup,
+                onChat: data.onChat
+            } 
         });
         return successReport()
     }catch(err){

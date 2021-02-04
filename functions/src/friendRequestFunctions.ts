@@ -134,6 +134,7 @@ export const acceptFriendRequest = functions.https.onCall(
     }
 });
 
+//TODO: remove them from eachother's firestore fcm doc too
 export const removeFriend = functions.https.onCall(
     async (data : fromToStruct, context) => {
     try{
