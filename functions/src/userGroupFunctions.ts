@@ -19,9 +19,6 @@ import {
 
 export const MAX_GROUP_NAME_LENGTH = 40
 
-//FIXME: This should be loaded in lazily
-import { randomEmoji } from './emojis'
-
 enum groupRanks {
   STANDARD = "standard",
   ADMIN = "admin"
@@ -118,7 +115,7 @@ export const createGroup = functions.https.onCall(
       //Now for the icing on the cake: Making an invite code for the group
       let unique = false
       while (!unique) { //FIXME: Potential point of woes haha
-        const inviteCode = randomEmoji() + randomEmoji() + randomEmoji() + randomEmoji() + randomEmoji()
+        const inviteCode = makeGroupInviteCode(7)
         const uniquenessCheck = await database.ref("userGroupCodes").orderByValue().equalTo(inviteCode).once("value");
         if (!uniquenessCheck.exists()) {
           updates[`userGroupCodes/${groupUid}`] = inviteCode
@@ -133,6 +130,16 @@ export const createGroup = functions.https.onCall(
       return handleError(err)
     }
   });
+
+const makeGroupInviteCode = (length: number): string  => {
+  let result = '';
+  const characters = 'abcdefghijklmnopqrstuvwxyz';
+  const charactersLength = characters.length;
+  for (let i = 0; i < length; i ++) {
+    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+  }
+  return result;
+}
 
 /**
  * Edits a Group by Adding/removing users or renaming a group or promoting/demoting people
@@ -351,11 +358,11 @@ const updateGroupName = async (data: groupEditRequest) => {
     (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
 
 
-    for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
-        updates[`userGroupMemberships/${uid}/${data.groupUid}`] = {name: data.newName, nameQuery: data.newName?.toLocaleLowerCase()}
-    }
-    updates[`/userGroups/${data.groupUid}/memberUids`] = {name: data.newName, nameQuery: data.newName?.toLocaleLowerCase()}
-    return updates
+  for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
+    updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name: data.newName, nameQuery: data.newName?.toLocaleLowerCase() }
+  }
+  updates[`/userGroups/${data.groupUid}/memberUids`] = { name: data.newName, nameQuery: data.newName?.toLocaleLowerCase() }
+  return updates
 }
 
 /**
