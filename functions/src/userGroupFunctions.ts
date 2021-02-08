@@ -72,7 +72,7 @@ const claimGroupLease = async (groupUid: string): Promise<leaseStatus> => {
 }
 
 /**
- * Creates a new Biteup group
+ * Creates a new Emit group
  */
 export const createGroup = functions.https.onCall(
   async (data: groupCreationRequest, context) => {

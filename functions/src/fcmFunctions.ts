@@ -77,7 +77,7 @@ export const fcmNewFriendRequest = functions.database.ref('/friendRequests/{rece
         const message = generateFCMMessageObject()
         message.data.reason = "friendRequest"
         message.data.title = `${snapshot.val().displayName} sent you a friend request!`
-        message.data.body = "Open Biteup to accept the friend request"
+        message.data.body = "Open Emit to accept the friend request"
         message.data.causerUid = context.params.senderUid
         await sendFCMMessageToUsers([context.params.receiverUid], message)
     })

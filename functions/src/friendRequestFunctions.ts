@@ -32,7 +32,7 @@ const standardChecks = (
 }
 
 /**
- * Sends a friend request to another Biteup user
+ * Sends a friend request to another Emit user
  */
 export const sendFriendRequest = functions.https.onCall(
     async (data : fromToStruct, context) => {

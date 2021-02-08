@@ -335,18 +335,18 @@ export const requestAllData = functions.https.onCall(
         });
     
         let mailMessage = `<p><strong>Heya ${displayName}!&nbsp;👋👋🏾</strong></p>\n`
-        mailMessage += '<p>Looks like you requested for all the personal data that Biteup has related to you.</p>\n'
+        mailMessage += '<p>Looks like you requested for all the personal data that Emit has related to you.</p>\n'
         mailMessage += "<p>You'll find it attached to this email as a JSON file.</p>\n"
         mailMessage += '<p>Ciao!</p>\n\n'
         mailMessage += "<p>P.S: Don't reply to this email address - it's never checked. It's only used by our servers to send user data upon request.</p>"
         const mailOptions = {
             from: functions.config().env.userDataEmailing.email_address, 
             to: userEmail, 
-            subject: `Your Biteup user data (@${username})`, 
+            subject: `Your Emit user data (@${username})`, 
             html: mailMessage,
             attachments: [
                 {
-                    filename: 'biteup_user_data.json',
+                    filename: 'emit_user_data.json',
                     content: JSON.stringify(userData)
                 }
             ]

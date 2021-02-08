@@ -1,7 +1,7 @@
-#  <img src="./readme_media/BiteupLogo.png" height= 50 align="left" /> Biteup Cloud
+#  <img src="./readme_media/EmitLogo.png" height= 50 align="left" /> Emit Cloud
 
 This is the repo that will house all of the server-side logic for 
-this Biteup, like Cloud Functions and Security Rules.
+this Emit, like Cloud Functions and Security Rules.
 
 No design docs here; you'll know where to find those if you're supposed to.
 
