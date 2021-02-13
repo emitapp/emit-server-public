@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
-import { objectDifference, errorReport, handleError, successReport } from './utilities';
+import { objectDifference, errorReport, handleError, successReport, truncate } from './utilities';
 import { NotificationSettings } from './accountManagementFunctions'
 import { CompleteRecepientList } from './activeBroadcastFunctions'
 
@@ -160,7 +160,7 @@ export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{br
         message.data.reason = 'broadcastResponse'
         message.data.title = `${snapshot.val().displayName} has responded to one of your broadcasts!`
         message.data.causerUid = context.params.newFriendUid
-        await sendFCMMessageToUsers([context.params.newResponderUid], message)
+        await sendFCMMessageToUsers([context.params.broadcasterUid], message)
     })
 
 /**
@@ -169,15 +169,17 @@ export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{br
 export const fcmChatNotification = functions.database.ref('activeBroadcasts/{broadcasterUid}/chats/{eventId}/{messageID}')
     .onCreate(async (snapshot, context) => {
         const message = generateFCMMessageObject()
+        const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.eventId}`).once("value")).val()
         message.data.reason = 'chatMessage'
-        message.data.body = snapshot.val().text
-        message.data.title = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.eventId}`)
-            .once("value")).val()?.activity
-        message.data.causerUid = snapshot.val().user.name
+        message.data.body = snapshot.val().user.name + ": " + truncate(snapshot.val().text, 100)
+        message.data.title = `Chat in ${flareInfo?.emoji} ${flareInfo?.activity}`
+        message.data.causerUid = snapshot.val().user.id
+        message.data.associatedFlareId = context.params.eventId
 
         const allChatRecepients = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/private/${context.params.eventId}/responderUids`).once("value")).val()
-        // TODO: make sure to not send yourself notifications. I suppose for now this can be handled client-side
-        const respondersArray: string[] = Object.keys(allChatRecepients)
+        if (!allChatRecepients) return;
+        const respondersArray: string[] = [...Object.keys(allChatRecepients), context.params.broadcasterUid]
+        respondersArray.splice(respondersArray.indexOf(message.data.causerUid), 1)
         await sendFCMMessageToUsers(respondersArray, message)
     })
 
