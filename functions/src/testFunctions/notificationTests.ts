@@ -11,12 +11,14 @@ const logger = functions.logger
 
 interface TokenNotificationData {
     receiverToken: string,
-    data: MulticastMessagePayload
+    data: MulticastMessagePayload,
+    notification: admin.messaging.Notification
 }
 
 interface UidNotificationData {
     receiverUids: string[],
     data: MulticastMessagePayload,
+    notification: admin.messaging.Notification
 }
 
 const checkIfEnabled = () => {
@@ -38,6 +40,7 @@ export const test_sendNotificationViaToken = functions.https.onCall(
         checkIfEnabled();
         const bareMessage = generateFCMMessageObject()
         bareMessage.data = params.data
+        bareMessage.notification = params.notification
         delete bareMessage.tokens;
         const message : admin.messaging.Message = {...bareMessage, token: params.receiverToken}
         
@@ -65,6 +68,7 @@ export const test_sendNotificationViaUid = functions.https.onCall(
         checkIfEnabled();
         const message  = generateFCMMessageObject()
         message.data = params.data
+        message.notification = params.notification
         await sendFCMMessageToUsers(params.receiverUids, message)
         return successReport()    
     }catch(err){
