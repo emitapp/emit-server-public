@@ -69,3 +69,7 @@ env.dev.json
 env.prod.json
 #https://firebase.google.com/docs/functions/local-emulator#set_up_functions_configuration_optional
 functions/.runtimeconfig.json 
+
+#Credential files for service accounts
+functions/lib/res/slack-sheets-credentials.json
+functions/src/res/slack-sheets-credentials.json
