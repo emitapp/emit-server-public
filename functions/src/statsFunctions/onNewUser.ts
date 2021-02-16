@@ -35,7 +35,7 @@ export const notifyOfNewUsers = functions.auth.user().onCreate(async (user) => {
     const webhook = new IncomingWebhook(functions.config().env.stats.new_user_slack_webhook)
     await webhook.send({
       icon_emoji: ":calling:",
-      text: `${new Date()}: ${new Date()}`
+      text: `${new Date()}: ${user.email}`
     })  
   }catch(err){
     logger.error("autoDeleteBroadcast error", err)

@@ -185,7 +185,7 @@ export const createActiveBroadcast = functions.https.onCall(
         nulledPaths[userBroadcastSection + "/responders/" + newBroadcastUid] = null
 
         //Chat section also starts off empty
-        nulledPaths[userBroadcastSection + "/chat/" + newBroadcastUid] = null
+        nulledPaths[userBroadcastSection + "/chats/" + newBroadcastUid] = null
 
         //Setting things up for the Cloud Task that will delete this broadcast after its ttl
         const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
