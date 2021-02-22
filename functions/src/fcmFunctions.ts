@@ -132,13 +132,16 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
     .onCreate(async (snapshot, context) => {
         const recepientList: CompleteRecepientList = snapshot.val()
         const fcmPromises: Promise<any>[] = []
+        const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.broadcastUid}`).once("value")).val()
+
 
         const fcmToDirectRecepients = async () => {
             const message = generateFCMMessageObject(600)
             const senderDisplayName = (await database.ref(`/userSnippets/${context.params.broadcasterUid}`)
                 .once("value")).val()?.displayName
             message.data.reason = 'newBroadcast'
-            message.notification.title = `${senderDisplayName} made a broadcast!`
+            message.notification.title = `${senderDisplayName} made a flare!`
+            message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
             message.data.causerUid = context.params.broadcasterUid
             await sendFCMMessageToUsers(Object.keys(recepientList.direct), message)
         }
@@ -146,7 +149,8 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
         const fcmToGroupRecepients = async (groupName: string, recepients: string[]) => {
             const message = generateFCMMessageObject(600)
             message.data.reason = 'newBroadcast'
-            message.notification.title = `A member of ${groupName} has made a new broadcast!`
+            message.notification.title = `A member of ${groupName} has made a new flare!`
+            message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
             message.data.causerUid = context.params.broadcasterUid
             await sendFCMMessageToUsers(Object.keys(recepients), message)
         }
@@ -248,7 +252,7 @@ export const generateFCMMessageObject = (expiresIn: number | null = null): Creat
         },
 
         android: {
-
+            
         },
 
         apns: {
@@ -263,8 +267,9 @@ export const generateFCMMessageObject = (expiresIn: number | null = null): Creat
     if (expiresIn) {
         //Useless if statements added because linter complaining about ts(2532) ('Possibly undefined')
         //Typescript is a genius ._.
-        if (message.android) message.android.ttl = expiresIn * 1000
-        if (message.apns?.headers) message.apns.headers["apns-expiration"] = `${Math.floor(Date.now() / 1000) + expiresIn}`
+        //FIXME: For some reason adding ttl information makes these notifications silent. Find out why
+        // if (message.android) message.android.ttl = expiresIn * 1000
+        // if (message.apns?.headers) message.apns.headers["apns-expiration"] = `${Math.floor(Date.now() / 1000) + expiresIn}`
     }
     return message
 }
