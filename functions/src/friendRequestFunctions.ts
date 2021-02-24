@@ -1,20 +1,21 @@
+//These were the first cloud functions written for Emit
+//We've gotten better since this, so if there are painful to work with, sorry!
 import * as functions from 'firebase-functions';
 import {handleError, successReport, errorReport} from './utilities';
 import admin = require('firebase-admin');
+import {subscribeToUserFlares, unsubscribeToUserFlares} from './accountManagementFunctions'
 
 const database = admin.database()
 
-export interface fromToStruct {
-    from: string,
-    to: string
-}
-
-interface friendRequestCancelStruct extends fromToStruct {
-    fromInbox: boolean
+export interface friendRequestFuncParams {
+    from: string, //The person calling this action
+    to: string //The person being affected by this action
+    fromInbox?: boolean, //Is this action being called from the inbox?
+    subscribeToFlares?: boolean //should "from" subcribe to "to"'s flares?
 }
 
 const standardChecks = (
-    data : fromToStruct, 
+    data : friendRequestFuncParams, 
     context : functions.https.CallableContext) => {
     // Checking that the user is authenticated.
     if (!context.auth) {
@@ -35,7 +36,7 @@ const standardChecks = (
  * Sends a friend request to another Emit user
  */
 export const sendFriendRequest = functions.https.onCall(
-    async (data : fromToStruct, context) => {
+    async (data : friendRequestFuncParams, context) => {
     try{
         standardChecks(data, context)
 
@@ -46,16 +47,18 @@ export const sendFriendRequest = functions.https.onCall(
         //Check if the to destination exists as a user...
         const fromSnapshot = await database.ref(`userSnippets/${data.from}`).once('value');
         const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
-        if (!toSnapshot.exists()){
-            return errorReport("This user doesn't exist")
-        }else{
-            const updates = {} as any;
-            const timestamp = Date.now()
-            updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
-            updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
-            await database.ref().update(updates);
-            return successReport()
-        }
+        if (!toSnapshot.exists()) return errorReport("This user doesn't exist")
+
+        const promises: Array<Promise<void>> = []
+        const updates = {} as any;
+        const timestamp = Date.now()
+        updates[`/friendRequests/${data.to}/inbox/${data.from}`] = {timestamp, ...fromSnapshot.val()};
+        updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
+        promises.push(database.ref().update(updates))
+
+        if (data.subscribeToFlares) promises.push(subscribeToUserFlares(data.from, data.to))
+        await Promise.all(promises)
+        return successReport()
     }catch(err){
         return handleError(err)
     }
@@ -66,7 +69,7 @@ export const sendFriendRequest = functions.https.onCall(
  * can be called from an outbox (ie a sender)or an inbox (ie a receiver)
  */
 export const cancelFriendRequest = functions.https.onCall(
-    async (data : friendRequestCancelStruct, context) => {
+    async (data : friendRequestFuncParams, context) => {
     try{
         standardChecks(data, context)
 
@@ -84,7 +87,12 @@ export const cancelFriendRequest = functions.https.onCall(
             updates[`/friendRequests/${data.to}/inbox/${data.from}`] = null;
             updates[`/friendRequests/${data.from}/outbox/${data.to}`] = null;
         }
-        await database.ref().update(updates);
+        
+        await Promise.all([
+            database.ref().update(updates),
+            unsubscribeToUserFlares(data.to, data.from),
+            unsubscribeToUserFlares(data.from, data.to)
+        ])
         return successReport()
     }catch(err){
         return handleError(err)
@@ -96,7 +104,7 @@ export const cancelFriendRequest = functions.https.onCall(
  * Accepts a friend request from another user
  */
 export const acceptFriendRequest = functions.https.onCall(
-    async (data : fromToStruct, context) => {
+    async (data : friendRequestFuncParams, context) => {
     try{
         standardChecks(data, context)
 
@@ -108,35 +116,31 @@ export const acceptFriendRequest = functions.https.onCall(
         const toSnapshot = await database.ref(`userSnippets/${data.to}`).once('value');
         const inboxSnapshot = await database.ref(`/friendRequests/${data.from}/inbox/${data.to}`).once('value');
 
+        const promises: Array<Promise<void>> = []
         const updates = {} as any;
-        let response = {} as any
+
+        if (!toSnapshot.exists()) return errorReport("This user doesn't exist!")
+        if (!inboxSnapshot.exists()) return errorReport("This user never sent you a friend request")
+
         updates[`/friendRequests/${data.from}/inbox/${data.to}`] = null;
         updates[`/friendRequests/${data.to}/outbox/${data.from}`] = null;
+        updates[`/userFriendGroupings/${data.from}/_masterSnippets/${data.to}`] = toSnapshot.val();
+        updates[`/userFriendGroupings/${data.to}/_masterSnippets/${data.from}`] = fromSnapshot.val();
+        updates[`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`] = true;
+        updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
+        promises.push(database.ref().update(updates))
 
-        //If the desintation doesn't exist, then let's just erase this friend request
-        if (!toSnapshot.exists()){
-            response = errorReport("This user doesn't exist!")
-        }else if (!inboxSnapshot.exists()){ 
-            //This user is trying to accept a request that was never sent to them
-            response = errorReport("This user never sent you a friend request")
-        }else{
-            updates[`/userFriendGroupings/${data.from}/_masterSnippets/${data.to}`] = toSnapshot.val();
-            updates[`/userFriendGroupings/${data.to}/_masterSnippets/${data.from}`] = fromSnapshot.val();
-            updates[`/userFriendGroupings/${data.from}/_masterUIDs/${data.to}`] = true;
-            updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
-            response = successReport()
-        }
-
-        await database.ref().update(updates);
-        return response
+        if (data.subscribeToFlares) promises.push(subscribeToUserFlares(data.from, data.to))
+        await Promise.all(promises)
+        return successReport()
     }catch(err){
         return handleError(err)
     }
 });
 
-//TODO: remove them from eachother's firestore fcm doc too
+
 export const removeFriend = functions.https.onCall(
-    async (data : fromToStruct, context) => {
+    async (data : friendRequestFuncParams, context) => {
     try{
         standardChecks(data, context)
         const updates = {} as any;
@@ -166,7 +170,12 @@ export const removeFriend = functions.https.onCall(
             }
         } 
 
-        await Promise.all([addAllRelevantPaths(data.from, data.to), addAllRelevantPaths(data.to, data.from)])
+        await Promise.all([
+            addAllRelevantPaths(data.from, data.to), 
+            addAllRelevantPaths(data.to, data.from),
+            unsubscribeToUserFlares(data.to, data.from),
+            unsubscribeToUserFlares(data.from, data.to)
+            ])
         await database.ref().update(updates);
         return successReport();
     }catch(err){
