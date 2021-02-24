@@ -125,7 +125,7 @@ export const createGroup = functions.https.onCall(
 
       await Promise.all(snippetAdditionPromises)
       await database.ref().update(updates);
-      return successReport
+      return successReport()
     } catch (err) {
       return handleError(err)
     }
