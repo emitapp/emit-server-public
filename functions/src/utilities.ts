@@ -18,13 +18,13 @@ export enum ExecutionStatus {
 
 interface ExecutionReport {
     status: ExecutionStatus,
-    message?: string,
+    message?: any,
     fatal?: boolean
 }
 
 type ErroneousStatus = Exclude<ExecutionStatus, ExecutionStatus.OK>;
 
-function createReport(status : ExecutionStatus, message? : string, fatalError?: boolean ) : ExecutionReport {
+function createReport(status : ExecutionStatus, message? : any, fatalError?: boolean ) : ExecutionReport {
     const response: ExecutionReport  = {status};
     if (message) response.message = message
     if (fatalError) response.fatal = true
@@ -35,7 +35,8 @@ function createReport(status : ExecutionStatus, message? : string, fatalError?: 
  * Generates a report that will be sent to the user if the function executed successfully
  * @param message Additional info that will be given to the user
  */
-export function successReport (message? : string) : ExecutionReport {
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+export function successReport (message? : any) : ExecutionReport {
     return createReport(ExecutionStatus.OK, message)
 }
 
@@ -76,8 +77,7 @@ export function handleError(err : any) : any {
             throw new HttpsError('unknown', "Something wrong happened! Please try again")
         }
     }else if (err.fatal){ //It's a fatal execution report
-        const constructedError = new Error(err.message);
-        constructedError.name = "fatal-error"
+        const constructedError = new Error(err.message); //Assumes err is an errorReport made via errorReport() so message : string
         throw constructedError;
     }else{ //It's a non-fatal execution report
         return err
