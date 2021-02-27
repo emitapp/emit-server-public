@@ -9,16 +9,40 @@
     "source": "functions"
   },
   "database": {
-    "predeploy": ["sh deploy-confirmation.sh"],
+    "predeploy": [
+      "sh deploy-confirmation.sh"
+    ],
     "rules": "database.rules.json"
   },
   "storage": {
-    "predeploy": ["sh deploy-confirmation.sh"],
+    "predeploy": [
+      "sh deploy-confirmation.sh"
+    ],
     "rules": "storage.rules"
   },
   "firestore": {
-    "predeploy": ["sh deploy-confirmation.sh"],
+    "predeploy": [
+      "sh deploy-confirmation.sh"
+    ],
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "hosting/build",
+    "predeploy": [
+      "sh deploy-confirmation.sh",
+      "cd hosting && npm run build && cd .."
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
   }
 }
