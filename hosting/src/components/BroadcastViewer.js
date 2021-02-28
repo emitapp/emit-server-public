@@ -1,6 +1,6 @@
 import ErrorMessageText from 'components/ErrorMessageText';
 import FlareTimeStatus from 'components/FlareTimeStatus';
-import LoadingAnim from 'components/LoadingAnim';
+import {FlameAnimation} from 'components/LoadingAnimations';
 import ProfilePicDisplayer from 'components/ProfilePicComponents';
 import firebase from "firebase/app";
 import React from 'react';
@@ -50,7 +50,7 @@ export default class BroadcastViewer extends React.Component {
       }}>
 
         <ErrorMessageText message={this.state.errorMessage} />
-        {!broadcastData && <LoadingAnim />}
+        {!broadcastData && <FlameAnimation />}
 
         {broadcastData &&
           <div style={{ width: "100%" }}>
