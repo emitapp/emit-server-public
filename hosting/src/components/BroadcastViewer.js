@@ -1,6 +1,6 @@
 import ErrorMessageText from 'components/ErrorMessageText';
 import FlareTimeStatus from 'components/FlareTimeStatus';
-import {FlameAnimation} from 'components/LoadingAnimations';
+import {FlameAnimation} from 'components/Animations';
 import ProfilePicDisplayer from 'components/ProfilePicComponents';
 import firebase from "firebase/app";
 import React from 'react';
