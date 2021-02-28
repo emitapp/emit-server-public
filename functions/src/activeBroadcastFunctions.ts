@@ -153,6 +153,18 @@ export const createActiveBroadcast = functions.https.onCall(
             }
         }
 
+        //Making the flare's URL slug...
+        let unique = false
+        let slug = ""
+        while (!unique) { //FIXME: Potential point of woes haha. 
+            slug = makeFlareSlug(6)
+            const uniquenessCheck = await database.ref(`flareSlugs/${slug}`).once("value");
+            if (!uniquenessCheck.exists()) unique = true
+        }
+
+        updates[`flareSlugs/${slug}`] = {flareUid: newBroadcastUid, ownerUid: data.ownerUid, private: false }
+        nulledPaths[`flareSlugs/${slug}`] = null
+
         //Active broadcasts are split into 4 sections
         //private (/private) data (only the server should really read and write)
         //public (/public) data (the owner can write, everyone can read)
@@ -168,6 +180,8 @@ export const createActiveBroadcast = functions.https.onCall(
             ...feedBroadcastObject,
             ...(data.note ? { note: data.note } : {}),
             totalConfirmations: 0,
+            slug,
+            slugPrivate: false
         }
 
         const broadcastPrivateData = {
@@ -443,6 +457,16 @@ const isBroadcastRecepient = (broadcastRecepients : CompleteRecepientList, uid :
     }
     return false;
 }
+
+const makeFlareSlug = (length: number): string  => {
+    let result = '';
+    const characters = 'abcdefghijklmnopqrstuvwxyz';
+    const charactersLength = characters.length;
+    for (let i = 0; i < length; i ++) {
+      result += characters.charAt(Math.floor(Math.random() * charactersLength));
+    }
+    return result;
+  }
 
 //Gets paths to all the active braodcast data related to the user
 export interface activeBroadcastPaths {

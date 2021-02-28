@@ -12,7 +12,7 @@ export default class BroadcastViewer extends React.Component {
     this.state = {
       attendees: [],
       errorMessage: null,
-      broadcastData: null,
+      broadcastData: this.props.broadcastSnippet,
       isModalVisible: false,
       showConfirmed: false
     }
@@ -21,9 +21,6 @@ export default class BroadcastViewer extends React.Component {
   }
 
   componentDidMount = () => {
-    firebase.database()
-      .ref(`activeBroadcasts/${this.broadcastSnippet.owner.uid}/public/${this.broadcastSnippet.uid}`)
-      .on('value', snap => this.setState({ broadcastData: snap.val() }))
 
     // firebase.database()
     //   .ref(`/activeBroadcasts/${this.broadcastSnippet.owner.uid}/responders/${this.broadcastSnippet.uid}`)

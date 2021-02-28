@@ -19,6 +19,7 @@ class FlareFinder extends Component {
         super(props)
 
         this.flareSlug = props.match.params.flareSlug
+        if (this.flareSlug) this.flareSlug = this.flareSlug.toLowerCase()
 
         this.state = {
             snippet: null,
@@ -33,17 +34,8 @@ class FlareFinder extends Component {
         if (firebase.apps.length === 0) {
             firebase.initializeApp(firebaseConfig);
             firebase.analytics()
-
-            firebase.database().ref('activeBroadcasts/pZRvXjG3V3alrgpGMrZpnCYzcKP2/public/-MUWPnlaWdlQsu3L_8PW').get()
-                .then(s => {
-                    this.setState({ loading: false })
-                    if (s.exists()) this.setState({ snippet: { ...s.val(), uid: s.key } })
-                })
-                .catch(e => {
-                    this.setState({ errorMessage: e.message })
-                    logError(e)
-                })
         }
+        this.getInitalData()
     }
 
     render() {
@@ -83,6 +75,24 @@ class FlareFinder extends Component {
         )
     }
 
+    getInitalData = async () => {
+        if (!this.flareSlug) return
+        try{
+            let flareInfo = await firebase.database().ref(`flareSlugs/${this.flareSlug}`).get()
+            if (!flareInfo.exists()){
+                this.setState({ loading: false })
+                return
+            } 
+
+            flareInfo = flareInfo.val()
+            const flare = await firebase.database().ref(`activeBroadcasts/${flareInfo.ownerUid}/public/${flareInfo.flareUid}`).get()
+            this.setState({ snippet: { ...flare.val(), uid: flareInfo.flareUid }, loading: false })
+        }catch(e){
+            this.setState({ errorMessage: e.message })
+            logError(e)
+        }
+    }
+
     renderMainContent = () => {
         if (!this.flareSlug) return null;
         return (
@@ -95,7 +105,7 @@ class FlareFinder extends Component {
         )
     }
 
-    renderForm = (buttonTitle) => {
+    renderForm = () => {
         if (this.flareSlug) return null;
         return (
             <div className="content">
