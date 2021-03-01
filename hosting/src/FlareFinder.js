@@ -62,14 +62,22 @@ class FlareFinder extends Component {
                 {this.renderMainContent()}
 
                 <footer className="footer">
-                    <p> Download Emit for free and make your own flares! </p>
-                    <a href="https://apps.apple.com/app/id1553654500" target="_blank" rel="noreferrer">
-                        <img
-                            style={{ height: 40, marginRight: 24, marginLeft: 24 }}
-                            src={AppStoreBadge}
-                            alt="Emit Logo"
-                        />
-                    </a>
+                    <p style={{ alignSelf: "flex-end", color: "lightgray", fontSize: 12, marginRight: 8 }}>
+                        Animations by <a href="https://lottiefiles.com/28795-camp-guy">romixi</a>,{" "}
+                        <a href="https://lottiefiles.com/16773-fire">白寒</a> and {" "}
+                        <a href="https://lottiefiles.com/share/2uqzwgsp">pixeltrue.</a>
+                    </p>
+                    <div className="footer-main-content">
+                        <p> Download Emit for free and make your own flares! </p>
+                        <a href="https://apps.apple.com/app/id1553654500" target="_blank" rel="noreferrer">
+                            <img
+                                style={{ height: 40, marginRight: 24, marginLeft: 24 }}
+                                src={AppStoreBadge}
+                                alt="Emit Logo"
+                            />
+                        </a>
+                    </div>
+
                 </footer>
             </div>
         )
@@ -77,17 +85,17 @@ class FlareFinder extends Component {
 
     getInitalData = async () => {
         if (!this.flareSlug) return
-        try{
+        try {
             let flareInfo = await firebase.database().ref(`flareSlugs/${this.flareSlug}`).get()
-            if (!flareInfo.exists()){
+            if (!flareInfo.exists()) {
                 this.setState({ loading: false })
                 return
-            } 
+            }
 
             flareInfo = flareInfo.val()
             const flare = await firebase.database().ref(`activeBroadcasts/${flareInfo.ownerUid}/public/${flareInfo.flareUid}`).get()
             this.setState({ snippet: { ...flare.val(), uid: flareInfo.flareUid }, loading: false })
-        }catch(e){
+        } catch (e) {
             this.setState({ errorMessage: e.message })
             logError(e)
         }
@@ -132,7 +140,7 @@ class FlareFinder extends Component {
         this.setState({ formInput: e.target.value })
     }
 
-    handleSubmit = () => {  
+    handleSubmit = () => {
         const strippedString = this.state.formInput.replace(/\s+/g, '').toLowerCase()
         if (strippedString) this.props.history.push(`/${strippedString}`)
     }

@@ -34,7 +34,7 @@ export class SearchingAnimation extends PureComponent {
 
 
 export class LochnessAnimation extends PureComponent {
-    //https://www.pixeltrue.com/result?search=Lochness
+    //https://www.pixeltrue.com/all-illustrations/error-lochness-monster-exist
     //https://lottiefiles.com/share/2uqzwgsp
     render() {
         return (

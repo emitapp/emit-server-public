@@ -4,7 +4,7 @@
     //Be sure to comment them again for producion
     //The syntax of RTDB rules would allow these two commands to override all the other rules
     ".read": true,
-    ".write": true,
+    ".write": "auth.uid != null",
 
 
     "userGroupCodes":{
