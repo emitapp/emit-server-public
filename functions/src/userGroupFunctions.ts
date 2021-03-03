@@ -103,7 +103,8 @@ export const createGroup = functions.https.onCall(
         name: data.name,
         nameQuery: data.name.toLocaleLowerCase(),
         leaseTime: Date.now(),
-        lastEditId: database.ref().push().key
+        lastEditId: database.ref().push().key,
+        isPublic: false
       }
       for (const uid of [...Object.keys(data.usersToAdd), userUid]) {
         updates[`userGroupMemberships/${uid}/${groupUid}`] = { name: data.name }
@@ -252,6 +253,7 @@ export const deleteGroup = functions.https.onCall(
 
 export const updateGroupMemberAndAdminCount = functions.database.ref('/userGroups/{groupUid}/snippet/lastEditId')
   .onWrite(async (snapshot, context) => {
+    //Triggers aren't executed in order so let's just check it outselves
     const currentEditId = await database.ref(`/userGroups/${context.params.groupUid}/snippet/lastEditId`)
       .once("value");
     //Make sure that this trigger is the trigger caused by the edit that most recently
@@ -312,7 +314,7 @@ const addMembers = async (data: groupEditRequest) => {
 
   for (const uid of newMembers) {
     updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name }
-    updates[`/userGroups/${data.groupUid}/memberUids/${uid}`] = true
+    updates[`/userGroups/${data.groupUid}/memberUids/${uid}`] = groupRanks.STANDARD
     snippetAdditionPromises.push(snippetAdditionPromise(uid))
   }
   await Promise.all(snippetAdditionPromises)
@@ -361,9 +363,58 @@ const updateGroupName = async (data: groupEditRequest) => {
   for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
     updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name: data.newName, nameQuery: data.newName?.toLocaleLowerCase() }
   }
-  updates[`/userGroups/${data.groupUid}/memberUids`] = { name: data.newName, nameQuery: data.newName?.toLocaleLowerCase() }
+  updates[`/userGroups/${data.groupUid}/snippet/name`] = data.newName
+  updates[`/userGroups/${data.groupUid}/snippet/nameQuery`] = data.newName?.toLocaleLowerCase()
   return updates
 }
+
+/**
+ * Turns a public group private or vise versa
+ */
+//TODO: ignoring lease logic here, should probably bring it back 
+export const changeGroupVisibility = functions.https.onCall(
+  async (groupUid: string, context) => {
+    try {
+      authCheck(context)
+      const updates = {} as any
+
+      const userRank = (await database
+        .ref(`/userGroups/${groupUid}/memberSnippets/${context.auth?.uid}/rank`)
+        .once("value")).val()
+
+      const groupSnippet = (await database.ref(`/userGroups/${groupUid}/snippet`).once("value"))
+
+      if (!groupSnippet.exists()) {
+        throw errorReport('Group does not exitst');
+      } else if (!userRank || userRank != groupRanks.ADMIN) {
+        throw errorReport('Not an admin of this group');
+      }
+
+      updates[`/userGroups/${groupUid}/snippet/isPublic`] = groupSnippet.val().isPublic ? false : true
+      await database.ref().update(updates)
+      return successReport()
+    } catch (err) {
+      return handleError(err)
+    }
+  });
+
+
+  //Depending on when this is called relative to updateGroupMemberAndAdminCount, the snippet counts 
+  //Might be a bit outdated, but that doesn't really matter
+  export const updatePublicSnippets = functions.database.ref('/userGroups/{groupUid}/snippet')
+  .onWrite(async (snapshot, context) => {
+    if (snapshot.before.val() === snapshot.after.val()) return; //Avoiding deletion cycle
+
+    const publicBefore = snapshot.before.val()?.isPublic
+    const publicNow = snapshot.after.val()?.isPublic
+
+    if (!publicBefore && publicNow){
+      await database.ref(`publicGroupSnippets/${context.params.groupUid}`).set(snapshot.after.val())
+    }else if (publicBefore && !publicNow){
+      await database.ref(`publicGroupSnippets/${context.params.groupUid}`).remove()
+    }
+  });
+
 
 /**
  * Adds the user to the group via invite code
@@ -381,8 +432,9 @@ export const joinGroupViaCode = functions.https.onCall(
         throw errorReport("Doesn't exist!")
       }
 
+      const groupUid = Object.keys(existenceCheck.val())[0]
       const request = {
-        groupUid: Object.keys(existenceCheck.val())[0],
+        groupUid,
         usersToAdd: {} as any
       }
       const userUid = <string>(context.auth?.uid)
@@ -390,6 +442,7 @@ export const joinGroupViaCode = functions.https.onCall(
 
       let updates = {} as any
       updates = { ...await addMembers(request) }
+      updates[`/userGroups/${groupUid}/snippet/lastEditId`] = database.ref().push().key
       await database.ref().update(updates);
 
       return successReport()
