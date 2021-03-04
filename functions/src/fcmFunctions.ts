@@ -193,7 +193,7 @@ export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{br
     .onCreate(async (snapshot, context) => {
         const message = generateFCMMessageObject()
         message.data.reason = 'broadcastResponse'
-        message.notification.title = `${snapshot.val().displayName} responded to your flare!`
+        message.notification.title = `${snapshot.val().displayName} is in!`
         message.data.causerUid = context.params.newFriendUid
         await sendFCMMessageToUsers([context.params.broadcasterUid], message)
     })
