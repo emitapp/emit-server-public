@@ -208,6 +208,7 @@ export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{br
  */
 export const fcmChatNotification = functions.database.ref('activeBroadcasts/{broadcasterUid}/chats/{eventId}/{messageID}')
     .onCreate(async (snapshot, context) => {
+        if (snapshot.val().system) return; //Don't send notifications for system type messages
         const message = generateFCMMessageObject()
         const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.eventId}`).once("value")).val()
         message.data.reason = 'chatMessage'

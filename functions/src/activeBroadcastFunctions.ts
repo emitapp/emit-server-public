@@ -313,6 +313,7 @@ export const setBroadcastResponse = functions.https.onCall(
         if (!responderSnippetSnapshot.exists()){
             throw errorReport(`Your account isn't set up yet`);
         }
+        const responderSnippet = responderSnippetSnapshot.val()
 
         if (!isBroadcastRecepient(broadcastRecepients, uid)){
             throw errorReport('Responder was never a recepient');
@@ -320,6 +321,15 @@ export const setBroadcastResponse = functions.https.onCall(
 
         const respondersPath = `activeBroadcasts/${data.broadcasterUid}/responders/${data.broadcastUid}/${uid}`
         const statusPath = `feeds/${uid}/${data.broadcastUid}/status`
+        
+        const chatPath = `/activeBroadcasts/${data.broadcasterUid}/chats/${data.broadcastUid}/`
+        const chatId = (await database.ref(chatPath).push()).key
+        const chatMessage = {
+            _id: chatId,
+            createdAt: Date.now(),
+            system: true,
+            user : {_id: "-", name: "-"} //TODO: For backwards compatability, can be removed in a few weeks 
+        } as any
 
         // if attendOrRemove param is not passed in (to account for old code not using this)
         // or it's true, confirm the user for the event
@@ -327,6 +337,9 @@ export const setBroadcastResponse = functions.https.onCall(
         if (data.attendOrRemove) { 
             updates[respondersPath] = responderSnippetSnapshot.val()
             updates[statusPath] = "confirmed"  // Also making sure this reflects on the responder's feed
+
+            chatMessage.text =`${responderSnippet.displayName} (@${responderSnippet.username}) is in!`
+            updates[chatPath + chatId] = chatMessage
             await database.ref().update(updates);
     
             // Incrementing the response counter now
@@ -348,6 +361,8 @@ export const setBroadcastResponse = functions.https.onCall(
             }
 
             updates[statusPath] = "cancelled"
+            chatMessage.text =`${responderSnippet.displayName} (@${responderSnippet.username}) is out.`
+            updates[chatPath + chatId] = chatMessage
             await database.ref().update(updates);
             await responderRef.remove()
 
