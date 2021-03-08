@@ -77,7 +77,7 @@ export const updateFCMTokenData = functions.https.onCall(
 export const disassociateToken = functions.https.onCall(
     async (data: fcmToken, _) => {
         try {
-            //Make sure the token is non-emoty 
+            //Make sure the token is non-empty 
             if (data.length === 0) {
                 throw errorReport('Your token in empty');
             }
@@ -257,7 +257,11 @@ export const generateFCMMessageObject = (expiresIn: number | null = null): Creat
 
         apns: {
             headers: {
-
+            }, 
+            payload: {
+                aps: {
+                    sound: "default"
+                }
             }
         },
 
