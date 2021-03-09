@@ -16,6 +16,8 @@ import {
   handleError,
   ExecutionStatus
 } from './utilities';
+import {subscribeToFlareSender, unsubscribeToFlareSender } from './accountManagementFunctions'
+
 
 export const MAX_GROUP_NAME_LENGTH = 40
 
@@ -88,7 +90,7 @@ export const createGroup = functions.https.onCall(
 
       const userUid = context.auth?.uid
       const updates = {} as any
-      const snippetAdditionPromises = []
+      const promises = []
       const additionPromise = async (uid: string) => {
         const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
         if (!snippetSnapshot.exists()) {
@@ -109,7 +111,8 @@ export const createGroup = functions.https.onCall(
       for (const uid of [...Object.keys(data.usersToAdd), userUid]) {
         updates[`userGroupMemberships/${uid}/${groupUid}`] = { name: data.name }
         updates[`${groupMasterPath}/memberUids/${uid}`] = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
-        snippetAdditionPromises.push(additionPromise(<string>uid))
+        promises.push(additionPromise(<string>uid))
+        promises.push(subscribeToFlareSender(uid as string, groupUid as string))
       }
 
 
@@ -124,7 +127,7 @@ export const createGroup = functions.https.onCall(
         }
       }
 
-      await Promise.all(snippetAdditionPromises)
+      await Promise.all(promises)
       await database.ref().update(updates);
       return successReport()
     } catch (err) {
@@ -201,7 +204,7 @@ export const editGroup = functions.https.onCall(
 
       let updates = {} as any
       if (data.usersToAdd) updates = { ...updates, ...await addMembers(data) }
-      if (data.usersToRemove) updates = { ...updates, ...removeMembers(data) }
+      if (data.usersToRemove) updates = { ...updates, ... await removeMembers(data) }
       if (data.newName) updates = { ...updates, ...await updateGroupName(data) }
       if (data.usersToPromote) updates = { ...updates, ...await changeRank(data, groupRanks.ADMIN) }
       if (data.usersToDemote) updates = { ...updates, ...await changeRank(data, groupRanks.STANDARD) }
@@ -238,7 +241,7 @@ export const deleteGroup = functions.https.onCall(
       const currentMembers =
         (await database.ref(`/userGroups/${data.groupUid}/memberUids`).once("value")).val()
 
-      const updates = removeMembers({ groupUid: data.groupUid, usersToRemove: currentMembers })
+      const updates = await removeMembers({ groupUid: data.groupUid, usersToRemove: currentMembers })
       updates[`/userGroups/${data.groupUid}/snippet/lastEditId`] = database.ref().push().key
       updates[`userGroupCodes/${data.groupUid}`] = null
 
@@ -291,9 +294,16 @@ export const updateGroupMemberAndAdminCount = functions.database.ref('/userGroup
     }
   });
 
+/**
+ * Created an object of the form {path: true} to add the users to a group
+ * Also has the side effect of subscribing them to the group too
+ * //TODO: noone likes side-effects, lol. Fix this later on.
+ * @param data 
+ * @returns An object that can be used in database.ref.update(x) for multipath updates to add the users
+ */
 const addMembers = async (data: groupEditRequest) => {
   const updates = {} as any
-  const snippetAdditionPromises = []
+  const promises = []
 
   const name = data.newName ||
     (await database.ref(`/userGroups/${data.groupUid}/snippet/name`).once("value")).val()
@@ -303,6 +313,7 @@ const addMembers = async (data: groupEditRequest) => {
 
   //Making sure we don't re-add people who are already in the group
   const newMembers = objectDifference(<Record<string, boolean>>data.usersToAdd, currentMembers)
+
   const snippetAdditionPromise = async (uid: string) => {
     const snippetSnapshot = await database.ref(`userSnippets/${uid}`).once("value")
     if (!snippetSnapshot.exists()) {
@@ -315,19 +326,33 @@ const addMembers = async (data: groupEditRequest) => {
   for (const uid of newMembers) {
     updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name }
     updates[`/userGroups/${data.groupUid}/memberUids/${uid}`] = groupRanks.STANDARD
-    snippetAdditionPromises.push(snippetAdditionPromise(uid))
+    promises.push(snippetAdditionPromise(uid))
+    promises.push(subscribeToFlareSender(uid, data.groupUid))
   }
-  await Promise.all(snippetAdditionPromises)
+
+  await Promise.all(promises)
   return updates
 }
 
-const removeMembers = (data: groupEditRequest) => {
+
+/**
+ * Created an object of the form {path: true} to remove the users to a group
+ * Also has the side effect of unsubscribing them to the group too
+ * //TODO: noone likes side-effects, lol. Fix this later on.
+ * @param data 
+ * @returns An object that can be used in database.ref.update(x) for multipath updates to add the users
+ */
+const removeMembers = async (data: groupEditRequest) => {
   const updates = {} as any
+  const promises = []
+
   for (const uid in data.usersToRemove) {
     updates[`/userGroups/${data.groupUid}/memberUids/${uid}`] = null
     updates[`/userGroups/${data.groupUid}/memberSnippets/${uid}`] = null
     updates[`userGroupMemberships/${uid}/${data.groupUid}`] = null
+    promises.push(unsubscribeToFlareSender(uid, data.groupUid))
   }
+  await Promise.all(promises)
   return updates
 }
 

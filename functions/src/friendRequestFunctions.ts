@@ -3,7 +3,7 @@
 import * as functions from 'firebase-functions';
 import {handleError, successReport, errorReport} from './utilities';
 import admin = require('firebase-admin');
-import {subscribeToUserFlares, unsubscribeToUserFlares} from './accountManagementFunctions'
+import {subscribeToFlareSender, unsubscribeToFlareSender} from './accountManagementFunctions'
 
 const database = admin.database()
 
@@ -56,7 +56,7 @@ export const sendFriendRequest = functions.https.onCall(
         updates[`/friendRequests/${data.from}/outbox/${data.to}`] = {timestamp, ...toSnapshot.val()};
         promises.push(database.ref().update(updates))
 
-        if (data.subscribeToFlares) promises.push(subscribeToUserFlares(data.from, data.to))
+        if (data.subscribeToFlares) promises.push(subscribeToFlareSender(data.from, data.to))
         await Promise.all(promises)
         return successReport()
     }catch(err){
@@ -90,8 +90,8 @@ export const cancelFriendRequest = functions.https.onCall(
         
         await Promise.all([
             database.ref().update(updates),
-            unsubscribeToUserFlares(data.to, data.from),
-            unsubscribeToUserFlares(data.from, data.to)
+            unsubscribeToFlareSender(data.to, data.from),
+            unsubscribeToFlareSender(data.from, data.to)
         ])
         return successReport()
     }catch(err){
@@ -130,7 +130,7 @@ export const acceptFriendRequest = functions.https.onCall(
         updates[`/userFriendGroupings/${data.to}/_masterUIDs/${data.from}`] = true;
         promises.push(database.ref().update(updates))
 
-        if (data.subscribeToFlares) promises.push(subscribeToUserFlares(data.from, data.to))
+        if (data.subscribeToFlares) promises.push(subscribeToFlareSender(data.from, data.to))
         await Promise.all(promises)
         return successReport()
     }catch(err){
@@ -173,8 +173,8 @@ export const removeFriend = functions.https.onCall(
         await Promise.all([
             addAllRelevantPaths(data.from, data.to), 
             addAllRelevantPaths(data.to, data.from),
-            unsubscribeToUserFlares(data.to, data.from),
-            unsubscribeToUserFlares(data.from, data.to)
+            unsubscribeToFlareSender(data.to, data.from),
+            unsubscribeToFlareSender(data.from, data.to)
             ])
         await database.ref().update(updates);
         return successReport();

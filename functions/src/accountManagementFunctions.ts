@@ -144,14 +144,16 @@ export const updateDisplayName = functions.https.onCall(
 });
 
 //Subscriber subscribes to a subscribee
-export const subscribeToUserFlares = async (subscriberUid : string, subscribeeUid : string) : Promise<void> => {
+//Subscibee can be a user or a group
+export const subscribeToFlareSender = async (subscriberUid : string, subscribeeUid : string) : Promise<void> => {
     await fcmDataRef.doc(subscriberUid).update({
         "notificationPrefs.onBroadcastFrom": admin.firestore.FieldValue.arrayUnion(subscribeeUid)
     });
 }
 
 //unsubscriber unsubscribes from an unsubscribee
-export const unsubscribeToUserFlares = async (unsubscriberUid : string, unsubscribeeUid : string) : Promise<void> => {
+//Subscibee can be a user or a group
+export const unsubscribeToFlareSender = async (unsubscriberUid : string, unsubscribeeUid : string) : Promise<void> => {
     await fcmDataRef.doc(unsubscriberUid).update({
         "notificationPrefs.onBroadcastFrom": admin.firestore.FieldValue.arrayRemove(unsubscribeeUid)
     });
@@ -169,8 +171,8 @@ export const changeFlareSubscription = functions.https.onCall(
                     throw errorReport("Invalid arguments")
             }
 
-            if (data.addUser) await subscribeToUserFlares(context.auth.uid, data.onBroadcastFrom)
-            else await unsubscribeToUserFlares(context.auth.uid, data.onBroadcastFrom)
+            if (data.addUser) await subscribeToFlareSender(context.auth.uid, data.onBroadcastFrom)
+            else await unsubscribeToFlareSender(context.auth.uid, data.onBroadcastFrom)
 
             return successReport()
         } catch(err) {

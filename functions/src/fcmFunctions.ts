@@ -131,6 +131,9 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
 export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}/recepientUids')
     .onCreate(async (snapshot, context) => {
         const recepientList: CompleteRecepientList = snapshot.val()
+        if (!recepientList.direct) recepientList.direct = {}
+        if (!recepientList.groups) recepientList.groups = {}
+
         const fcmPromises: Promise<any>[] = []
         const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.broadcastUid}`).once("value")).val()
 
@@ -146,18 +149,20 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
             await sendFCMMessageToUsers(Object.keys(recepientList.direct), message)
         }
 
-        const fcmToGroupRecepients = async (groupName: string, recepients: string[]) => {
+        const fcmToGroupRecepients = async (groupName: string, groupUid: string, recepients: string[]) => {
             const message = generateFCMMessageObject(600)
             message.data.reason = 'newBroadcast'
             message.notification.title = `A member of ${groupName} has made a new flare!`
             message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
             message.data.causerUid = context.params.broadcasterUid
-            await sendFCMMessageToUsers(Object.keys(recepients), message)
+            message.data.groupUid = groupUid
+            await sendFCMMessageToUsers(recepients, message)
         }
 
         fcmPromises.push(fcmToDirectRecepients())
-        for (const group of Object.values(recepientList.groups || {})) {
-            fcmPromises.push(fcmToGroupRecepients(group.groupName, Object.keys(group.members)))
+        for (const groupUid of Object.keys(recepientList.groups || {})) {
+            const group = recepientList.groups[groupUid]
+            fcmPromises.push(fcmToGroupRecepients(group.groupName, groupUid, Object.keys(group.members)))
         }
         await Promise.all(fcmPromises)
     })
@@ -168,11 +173,11 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
 export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/memberUids')
     .onWrite(async (snapshot, context) => {
         if (!snapshot.after.exists()) return; //The group was deleted
-        const newMembersUids: string[] = []
+        let newMembersUids: string[] = []
         if (snapshot.before.val()) {
-            newMembersUids.concat([...objectDifference(snapshot.after.val(), snapshot.before.val())])
+            newMembersUids = newMembersUids.concat([...objectDifference(snapshot.after.val(), snapshot.before.val())])
         } else {
-            newMembersUids.concat(Object.keys(snapshot.after.val()))
+            newMembersUids = newMembersUids.concat(Object.keys(snapshot.after.val()))
         }
 
         const groupName = (await admin.database()
@@ -252,12 +257,12 @@ export const generateFCMMessageObject = (expiresIn: number | null = null): Creat
         },
 
         android: {
-            
+
         },
 
         apns: {
             headers: {
-            }, 
+            },
             payload: {
                 aps: {
                     sound: "default"
@@ -367,14 +372,16 @@ const getFCMTokens = async (uid: string, message: CreatedMulticastMessage): Prom
     if (tokenArray.length === 0) return undefined
 
     //Now let's check the user prefs against the notification information
-    const { reason, causerUid: causalUserUid } = message.data
+    const { reason, causerUid, groupUid } = message.data
     if (reason === 'mandatory') return tokenArray
     if (reason === 'friendRequest' && settings.onNewFriendRequest) return tokenArray
     if (reason === 'newFriend' && settings.onNewFriend) return tokenArray
     if (reason === 'broadcastResponse' && settings.onNewBroadcastResponse) return tokenArray
-    if (reason === 'newBroadcast' && settings.onBroadcastFrom.includes(causalUserUid)) return tokenArray
     if (reason === 'newGroup' && settings.onAddedToGroup) return tokenArray
     if (reason === 'chatMessage' && settings.onChat) return tokenArray
+    if (reason === 'newBroadcast'
+        && (settings.onBroadcastFrom.includes(causerUid)
+            || settings.onBroadcastFrom.includes(groupUid))) return tokenArray
     return undefined
 }
 
