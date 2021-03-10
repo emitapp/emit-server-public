@@ -36,7 +36,12 @@ interface DeletionTaskPayload {
 
 export interface CompleteRecepientList {
     direct: { [key: string]: boolean; },
-    groups: {[key: string]: RecepientGroupInfo}
+    groups: {[key: string]: RecepientGroupInfo},
+
+    //These are onyl used for anaytics
+    totalRecepients: number,
+    totalGroupRecepients : number,
+    totalDirectRecepients: number,
 }
 
 interface RecepientGroupInfo {
@@ -166,11 +171,12 @@ export const createActiveBroadcast = functions.https.onCall(
         nulledPaths[`flareSlugs/${slug}`] = null
 
         //Active broadcasts are split into 4 sections
-        //private (/private) data (only the server should really read and write)
+        //private (/private) data (only the server should really read and write, though the 
+        //owner has read access to the /ga_analytics subdirectory)
         //public (/public) data (the owner can write, everyone can read)
         //and responder (/responders) data (which can be a bit large, which is 
         //why it is its own section to be loaded only when needed)
-        //chat (/chat), which contains the chat associated with the broadcast
+        //chat (/chats), which contains the chat associated with the broadcast
         //TODO: move chat to a separate database later on
         //TODO: add in some security rules for chat
         //Note that none of these is the object that's going into people's feeds
@@ -187,7 +193,23 @@ export const createActiveBroadcast = functions.https.onCall(
         const broadcastPrivateData = {
             cancellationTaskPath: "",
             recepientUids: allRecepients,
-            confirmationCap: data.maxResponders || null
+            confirmationCap: data.maxResponders || null,
+
+            //Be sure to limit this to 30 params, that's the limit for Google Analytics
+            ga_analytics: {
+                flareUid: newBroadcastUid,
+                ownerUid: data.ownerUid,
+                activity: data.activity,
+                emoji: data.emoji,
+                geolocationAdded: data.geolocation ? true : false,
+                noteAdded: data.note ? true : false,
+                responderCap: data.maxResponders || 0,
+                duration: data.duration,
+                startingTime: absoluteStartingTime,
+                totalRecepientsNonDistinct: allRecepients.totalRecepients,
+                totalDirectRecepientsNonDistinct: allRecepients.totalDirectRecepients,
+                totalGroupRecepientsNonDistinct: allRecepients.totalGroupRecepients,
+            }
         }
 
         updates[userBroadcastSection + "/public/" + newBroadcastUid] = broadcastPublicData
@@ -238,7 +260,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         //And lastly, doing the batch writes
         await database.ref().update(updates);
-        return successReport()
+        return successReport({flareUid: newBroadcastUid})
     }catch(err){
         return handleError(err)
     }
@@ -384,7 +406,13 @@ const generateRecepientObject =
     async (data : BroadcastCreationRequest, userUid : string) : Promise<CompleteRecepientList> => {
 
     let allFriends = {} as { [key: string]: boolean; }
-    const allRecepients = {direct: {}, groups: {}} as CompleteRecepientList
+    const allRecepients : CompleteRecepientList = {
+        direct: {}, 
+        groups: {}, 
+        totalRecepients: 0, 
+        totalDirectRecepients: 0, 
+        totalGroupRecepients: 0
+    }
 
     const maskRetrievalPromise = async (maskUid : string) => {
         const maskMembers = 
@@ -410,6 +438,7 @@ const generateRecepientObject =
         delete members[userUid] //So the sender does't get sent his own broadcast
 
         allRecepients.groups[groupUid] = {groupName, members}
+        allRecepients.totalGroupRecepients += Object.keys(members).length
     }
 
     const friendRetrievalPromise = async () => {
@@ -443,6 +472,11 @@ const generateRecepientObject =
             else throw errorReport("Non-friend uid provided")
         }
     }
+
+    allRecepients.totalDirectRecepients = Object.keys(allRecepients.direct).length
+    //TODO: This allows for overlap since I can have someone who's both in a group (or even worse,
+    // numerous groups!) and also be a direct recepient
+    allRecepients.totalRecepients = allRecepients.totalDirectRecepients + allRecepients.totalGroupRecepients
     return allRecepients;
 }
 

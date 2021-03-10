@@ -445,7 +445,7 @@ export const joinGroupViaCode = functions.https.onCall(
       updates[`/userGroups/${groupUid}/snippet/lastEditId`] = database.ref().push().key
       await database.ref().update(updates);
 
-      return successReport()
+      return successReport({groupUid})
     } catch (err) {
       return handleError(err)
     }
