@@ -11,5 +11,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /userMetadata/{userUid} {
+      allow read: if request.auth != null && request.auth.uid == userUid;
+      allow write: if false;
+    }
+
   }
 }

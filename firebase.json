@@ -1,8 +1,8 @@
 {
   "functions": {
     "predeploy": [
-      "sh deploy-confirmation.sh",
-      "sh update-environment.sh",
+      "sh bash_scripts/deploy-confirmation.sh",
+      "sh bash_scripts/update-environment.sh",
       "npm --prefix \"$RESOURCE_DIR\" run lint",
       "npm --prefix \"$RESOURCE_DIR\" run build"
     ],
@@ -10,19 +10,19 @@
   },
   "database": {
     "predeploy": [
-      "sh deploy-confirmation.sh"
+      "sh bash_scripts/deploy-confirmation.sh"
     ],
     "rules": "database.rules.json"
   },
   "storage": {
     "predeploy": [
-      "sh deploy-confirmation.sh"
+      "sh bash_scripts/deploy-confirmation.sh"
     ],
     "rules": "storage.rules"
   },
   "firestore": {
     "predeploy": [
-      "sh deploy-confirmation.sh"
+      "sh bash_scripts/deploy-confirmation.sh"
     ],
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
@@ -30,7 +30,7 @@
   "hosting": {
     "public": "hosting/build",
     "predeploy": [
-      "sh deploy-confirmation.sh",
+      "sh bash_scripts/deploy-confirmation.sh",
       "cd hosting && npm run build && cd .."
     ],
     "ignore": [

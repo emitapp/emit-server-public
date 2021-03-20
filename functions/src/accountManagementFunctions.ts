@@ -7,6 +7,8 @@ import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions'
 import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
 import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
 import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'
+import { parsePhoneNumberFromString } from 'libphonenumber-js'
+
 
 export const MAX_USERNAME_LENGTH = 30
 export const MAX_DISPLAY_NAME_LENGTH = 35
@@ -14,10 +16,12 @@ export const MAX_DISPLAY_NAME_LENGTH = 35
 const database = admin.database()
 const firestore = admin.firestore();
 const fcmDataRef = firestore.collection("fcmData")
+const userMetadata = firestore.collection("userMetadata")
 
 interface snippetCreationRequest{
     displayName:string,
-    username:string
+    username:string,
+    telephone?:string
 }
 
 export interface NotificationSettings {
@@ -65,6 +69,18 @@ export const createSnippet = functions.https.onCall(
         if (!regexTest.test(lowerNormalisedUsername)){
             throw errorReport("Only A-Z, a-z, 0-9 or _ or - allowed for username")
         }
+
+        //Mkaing sure phone number (if there) is valid
+        let phoneNumberLocal = ""
+        let phoneNumberInternational = ""
+        let phoneNumberCountry = ""
+        if (data.telephone){
+            const parsedPhoneNumber = parsePhoneNumberFromString(data.telephone, {extract: false, defaultCountry: "US"})
+            if (!parsedPhoneNumber) throw errorReport("Invalid Phone number")
+            phoneNumberLocal = parsedPhoneNumber.format("NATIONAL")
+            phoneNumberInternational = parsedPhoneNumber.format("INTERNATIONAL")
+            phoneNumberCountry = parsedPhoneNumber.country || ""
+        }
     
         //Making sure the snippet doesn't already exist
         const snippetRef = database.ref(`/userSnippets/${context.auth.uid}`);
@@ -87,27 +103,79 @@ export const createSnippet = functions.https.onCall(
             }
         });
 
-        await fcmDataRef.doc(context.auth.uid).set({
-            notificationPrefs:{
-                onBroadcastFrom: [],
-                onNewBroadcastResponse: true,
-                onNewFriend: true,
-                onNewFriendRequest: true,
-                onAddedToGroup: true,
-                onChat: true
-            },
-            tokens: []
-        });
+        const promises = [] as Array<Promise<any>>
+        
+        promises.push(
+            fcmDataRef.doc(context.auth.uid).set({
+                notificationPrefs:{
+                    onBroadcastFrom: [],
+                    onNewBroadcastResponse: true,
+                    onNewFriend: true,
+                    onNewFriendRequest: true,
+                    onAddedToGroup: true,
+                    onChat: true
+                },
+                tokens: []
+            })
+        );
 
-        await snippetRef.set({
-            username: normalizedUsername,
-            usernameQuery: lowerNormalisedUsername,
-            displayName: normalizedDisplayName,
-            displayNameQuery: lowerNormalisedDisplayName
-        }) 
+        if (data.telephone){
+            promises.push(
+                userMetadata.doc(context.auth.uid).set({
+                    phoneNumberInfo:{
+                        phoneNumberLocal,
+                        phoneNumberInternational, 
+                        phoneNumberCountry
+                    }
+                })
+            );
+        }
+
+        promises.push(
+            snippetRef.set({
+                username: normalizedUsername,
+                usernameQuery: lowerNormalisedUsername,
+                displayName: normalizedDisplayName,
+                displayNameQuery: lowerNormalisedDisplayName
+            }) 
+        )
+
+        await Promise.all(promises)
         return successReport()    
     }catch(err){
         return handleError(err);
+    }  
+});
+
+
+export const updatePhoneNumber = functions.https.onCall(
+    async (phoneNumber : string, context) => {
+    try{
+        if (!context.auth) {
+            throw errorReport("Authentication needed")
+        }
+      
+        //Mkaing sure phone number is valid
+        let phoneNumberLocal = ""
+        let phoneNumberInternational = ""
+        let phoneNumberCountry = ""
+        const parsedPhoneNumber = parsePhoneNumberFromString(phoneNumber, {extract: false, defaultCountry: "US"})
+        if (!parsedPhoneNumber) throw errorReport("Invalid Phone number")
+        phoneNumberLocal = parsedPhoneNumber.format("NATIONAL")
+        phoneNumberInternational = parsedPhoneNumber.format("INTERNATIONAL")
+        phoneNumberCountry = parsedPhoneNumber.country || ""
+
+        await userMetadata.doc(context.auth.uid).set({
+            phoneNumberInfo:{
+                phoneNumberLocal,
+                phoneNumberInternational, 
+                phoneNumberCountry
+            }
+        })
+
+        return successReport()
+    }catch(err){
+        return handleError(err)
     }  
 });
 
@@ -228,11 +296,14 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     const promises = [] as Array<Promise<any>>
     allPaths.savedLocationsPath = `savedLocations/${userUid}`
     allPaths.userSnippetExtrasPath = `userSnippetExtras/${userUid}`
+    allPaths.userMetadataPath = `userMetadata/${userUid}`
+
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
         allPaths.userSnippetPath = `userSnippets/${userUid}`
         allPaths.usernamePath = userSnippet ? `usernames/${userSnippet.usernameQuery}` : null
     })())
+
     promises.push(getAllActiveBroadcastPaths(userUid).then(paths => allPaths.activeBroadcastPaths = paths))
     promises.push(getAllFriendshipRelatedPaths(userUid).then(paths => allPaths.friendshipPaths = paths))
     promises.push(getAllGroupPaths(userUid).then(paths => allPaths.groupPaths = paths))
@@ -247,6 +318,7 @@ interface allPathsContainer {
     userSnippetPath: string,
     usernamePath: string,
     savedLocationsPath: string,
+    userMetadataPath: string,
     userSnippetExtrasPath: string,
     activeBroadcastPaths: activeBroadcastPaths,
     friendshipPaths: FriendshipRelatedPaths,
@@ -411,6 +483,10 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
 
     promises.push((async () => {
         await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete()
+    })())
+
+    promises.push((async () => {
+        await firestore.doc(allPaths.userMetadataPath).delete()
     })())
    
     promises.push((async () => {
