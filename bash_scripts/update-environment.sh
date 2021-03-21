@@ -1,15 +1,17 @@
-projectState=$(node prodEnvChecker.js $(firebase use))
+# Expected pwd: project root
+
+projectState=$(node bash_scripts/prodEnvChecker.js $(firebase use))
 
 if [[ $projectState = "dev" ]]
 then
   echo "💻Applying dev environment configuration"
   firebase functions:config:unset env 
-  firebase functions:config:set env="$(cat env.dev.json)"
+  firebase functions:config:set env="$(cat .env/env.dev.json)"
 elif [[ $projectState = "prod" ]]
 then
   echo "📲Applying production environment configuration"
   firebase functions:config:unset env 
-  firebase functions:config:set env="$(cat env.prod.json)"
+  firebase functions:config:set env="$(cat .env/env.prod.json)"
 elif [[ $projectState = "none" ]]
 then
   echo "🤷🏿‍♂️Your current project is using neither the 'dev' or the 'production' alias"

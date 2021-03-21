@@ -1,3 +1,5 @@
+#Expected pwd: project root
+
 echo "🔥🔥🔥"
 echo "You are about to deploy to: "
 projectname=$(firebase use)

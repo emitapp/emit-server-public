@@ -1,0 +1,6 @@
+{
+"name": "server",
+  "scripts": {
+    "copyenv": "sh bash_scripts/copy-env-files.sh"
+  }
+}

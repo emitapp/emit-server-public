@@ -1,5 +1,10 @@
 # https://firebase.googleblog.com/2018/01/streamline-typescript-development-cloud-functions.html
 
+# Expected pwd: /functions
+cd ..
+sh bash_scripts/update-environment.sh
+cd functions
+
 echo "Running tsc in watch mode 📹"
 ./node_modules/.bin/tsc --watch &
 

@@ -61,12 +61,12 @@ node_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
-.env
 
-#User added files
-env.dev.json
-env.prod.json
+#User added env files
+.env/*
+!.env/env.example.jsonc
+!.env/README.md
+
 #https://firebase.google.com/docs/functions/local-emulator#set_up_functions_configuration_optional
 functions/.runtimeconfig.json 
 
