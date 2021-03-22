@@ -44,6 +44,7 @@ export const getUsersFromContacts = functions.https.onCall(
             }catch(err){
                 //If there was an error simply becuase the user didn't exist, ignore
                 if (err?.code == "auth/user-not-found") return;
+                if (err?.code == "auth/invalid-email") return;
                 //Otherwise this is a legitimate error and it should bubble up
                 throw err
             }  
