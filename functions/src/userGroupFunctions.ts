@@ -103,13 +103,13 @@ export const createGroup = functions.https.onCall(
       //The member count and admin count is handled by a trigger cloud function
       updates[`${groupMasterPath}/snippet`] = {
         name: data.name,
-        nameQuery: data.name.toLocaleLowerCase(),
+        nameQuery : makeQueryableGroupName(data.name),
         leaseTime: Date.now(),
         lastEditId: database.ref().push().key,
         isPublic: false
       }
       for (const uid of [...Object.keys(data.usersToAdd), userUid]) {
-        updates[`userGroupMemberships/${uid}/${groupUid}`] = { name: data.name }
+        updates[`userGroupMemberships/${uid}/${groupUid}`] = { name: data.name, nameQuery: makeQueryableGroupName(data.name) }
         updates[`${groupMasterPath}/memberUids/${uid}`] = uid === userUid ? groupRanks.ADMIN : groupRanks.STANDARD
         promises.push(additionPromise(<string>uid))
         promises.push(subscribeToFlareSender(uid as string, groupUid as string))
@@ -386,10 +386,10 @@ const updateGroupName = async (data: groupEditRequest) => {
 
 
   for (const uid of objectDifference(currentMembers, data.usersToRemove || {})) {
-    updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name: data.newName, nameQuery: data.newName?.toLocaleLowerCase() }
+    updates[`userGroupMemberships/${uid}/${data.groupUid}`] = { name: data.newName, nameQuery: makeQueryableGroupName(data.newName as string) }
   }
   updates[`/userGroups/${data.groupUid}/snippet/name`] = data.newName
-  updates[`/userGroups/${data.groupUid}/snippet/nameQuery`] = data.newName?.toLocaleLowerCase()
+  updates[`/userGroups/${data.groupUid}/snippet/nameQuery`] = makeQueryableGroupName(data.newName as string)
   return updates
 }
 
@@ -433,12 +433,18 @@ export const changeGroupVisibility = functions.https.onCall(
     const publicBefore = snapshot.before.val()?.isPublic
     const publicNow = snapshot.after.val()?.isPublic
 
-    if (!publicBefore && publicNow){
+    if (publicNow){ 
       await database.ref(`publicGroupSnippets/${context.params.groupUid}`).set(snapshot.after.val())
     }else if (publicBefore && !publicNow){
       await database.ref(`publicGroupSnippets/${context.params.groupUid}`).remove()
+    }else if (!snapshot.after.exists()){
+      await database.ref(`publicGroupSnippets/${context.params.groupUid}`).remove()
     }
   });
+
+  const makeQueryableGroupName  = (name : string) : string => {
+    return name.toLowerCase()
+  }
 
 
 /**
@@ -450,8 +456,10 @@ export const joinGroupViaCode = functions.https.onCall(
     try {
       authCheck(context)
 
+      if (typeof inviteCode != "string") throw errorReport("Bad input!")
+
       const existenceCheck = await database.ref("userGroupCodes").
-        orderByValue().equalTo(inviteCode).once("value");
+        orderByValue().equalTo(inviteCode.toLowerCase()).once("value");
 
       if (!existenceCheck.exists()) {
         throw errorReport("Doesn't exist!")
