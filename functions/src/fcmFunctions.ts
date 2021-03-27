@@ -136,12 +136,12 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
 
         const fcmPromises: Promise<any>[] = []
         const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.broadcastUid}`).once("value")).val()
-
+        const senderDisplayName = (await database.ref(`/userSnippets/${context.params.broadcasterUid}`)
+            .once("value")).val()?.displayName
 
         const fcmToDirectRecepients = async () => {
             const message = generateFCMMessageObject(600)
-            const senderDisplayName = (await database.ref(`/userSnippets/${context.params.broadcasterUid}`)
-                .once("value")).val()?.displayName
+
             message.data.reason = 'newBroadcast'
             message.notification.title = `${senderDisplayName} made a flare!`
             message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
@@ -152,8 +152,8 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
         const fcmToGroupRecepients = async (groupName: string, groupUid: string, recepients: string[]) => {
             const message = generateFCMMessageObject(600)
             message.data.reason = 'newBroadcast'
-            message.notification.title = `A member of ${groupName} has made a new flare!`
-            message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
+            message.notification.title = `${senderDisplayName} made a flare!`
+            message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity} (via ${groupName} group)`
             message.data.causerUid = context.params.broadcasterUid
             message.data.groupUid = groupUid
             await sendFCMMessageToUsers(recepients, message)
