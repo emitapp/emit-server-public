@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import {isOnlyWhitespace, handleError, successReport, errorReport} from './utilities';
+import {isOnlyWhitespace, handleError, successReport, errorReport} from './utils/utilities';
 import admin = require('firebase-admin');
 
 const database = admin.database()

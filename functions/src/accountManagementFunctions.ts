@@ -1,9 +1,9 @@
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
-import {isOnlyWhitespace, errorReport, successReport, handleError} from './utilities'
+import {isOnlyWhitespace, errorReport, successReport, handleError} from './utils/utilities'
 import {getAllActiveBroadcastPaths, activeBroadcastPaths} from './activeBroadcastFunctions'
 import {getCloudStoragePaths, CloudStoragePaths} from './cloudStorageFunctions'
-import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions'
+import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions/fcmCore'
 import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
 import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
 import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'

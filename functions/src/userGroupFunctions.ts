@@ -15,7 +15,7 @@ import {
   successReport,
   handleError,
   ExecutionStatus
-} from './utilities';
+} from './utils/utilities';
 import {subscribeToFlareSender, unsubscribeToFlareSender } from './accountManagementFunctions'
 
 

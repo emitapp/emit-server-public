@@ -1,6 +1,6 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
-import { errorReport, handleError, successReport } from '../utilities';
+import { errorReport, handleError, successReport } from '../../utils/utilities';
 
 const logger = functions.logger
 const firestore = admin.firestore();

@@ -15,7 +15,7 @@ google.options({
 
 const logger = functions.logger
 
-export const notifyOfNewUsers = functions.auth.user().onCreate(async (user) => {
+export const notifyDevsOfNewUsers = functions.auth.user().onCreate(async (user) => {
   if (functions.config().env.stats.is_prod_server != "yes") return;
   try{
     const spreadsheetId = functions.config().env.stats.new_users_sheets_id

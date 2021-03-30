@@ -1,10 +1,8 @@
 //TODO: Purge masks from this file (and the other files that link to it)
 import * as functions from 'firebase-functions';
-//@google-cloud/tasks doesn’t yet support import syntax at time of writing
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { CloudTasksClient } = require('@google-cloud/tasks') 
 import admin = require('firebase-admin');
-import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from './utilities';
+import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from './utils/utilities';
+import {enqueueTask} from './utils/cloudTasks'
 
 export const MAX_LOCATION_NAME_LENGTH = 100
 export const MAX_BROADCAST_NOTE_LENGTH = 500
@@ -57,10 +55,7 @@ interface BroadcastConfirmationReq {
 
 const database = admin.database()
 const FLARE_LIFETIME_CAP_MINS = 2879 //48 hours - 1 minute
-const TASKS_LOCATION = functions.config().env.broadcastCreation.tasks_location
-const FUNCTIONS_LOCATION = functions.config().env.broadcastCreation.functions_location
 const TASKS_QUEUE = functions.config().env.broadcastCreation.autodelete_task_queue_name
-const serviceAccountEmail = functions.config().env.broadcastCreation.service_account_email;
 
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
@@ -223,38 +218,10 @@ export const createActiveBroadcast = functions.https.onCall(
         //Chat section also starts off empty
         nulledPaths[userBroadcastSection + "/chats/" + newBroadcastUid] = null
 
-        //Setting things up for the Cloud Task that will delete this broadcast after its ttl
-        const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
-        const tasksClient = new CloudTasksClient()
-
-        //queuePath is going to be a string that is the full path of the queue .
-        const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, TASKS_QUEUE)
-
-        const deletionFuncUrl = `https://${FUNCTIONS_LOCATION}-${project}.cloudfunctions.net/autoDeleteBroadcast`
-
+        //Enqueueing the deletion task
         const payload: DeletionTaskPayload = { paths: nulledPaths}
+        const response = await enqueueTask(TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
 
-        //Now making the task itself (its an HTTPS request)
-        const task = {
-            httpRequest: {
-              httpMethod: 'POST',
-              url: deletionFuncUrl,
-              oidcToken: {
-                serviceAccountEmail,
-              },          
-              //Encoding to base64 is required by the Cloud Tasks API. 
-              body: Buffer.from(JSON.stringify(payload)).toString('base64'),
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            },
-            scheduleTime: {
-              seconds: deathTime / 1000 //in epoch seconds
-            }
-        }
-
-        //Finally actaully enqueueing the deletion task
-        const [ response ] = await tasksClient.createTask({ parent: queuePath, task })
         //Then giving the broadcast it's deletion task's id (in case we want to cancel the scheduled deletion or something)
         updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
 

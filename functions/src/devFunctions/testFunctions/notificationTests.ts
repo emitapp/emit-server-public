@@ -1,11 +1,11 @@
 import admin = require('firebase-admin');
 import * as functions from 'firebase-functions';
-import {successReport, errorReport, handleError} from '../utilities'
+import {successReport, errorReport, handleError} from '../../utils/utilities'
 import {
     sendFCMMessageToUsers, 
     generateFCMMessageObject, 
     MulticastMessagePayload
-} from '../fcmFunctions'
+} from '../../fcmFunctions/fcmCore'
 
 const logger = functions.logger
 

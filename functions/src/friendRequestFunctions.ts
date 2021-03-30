@@ -1,7 +1,7 @@
 //These were the first cloud functions written for Emit
 //We've gotten better since this, so if there are painful to work with, sorry!
 import * as functions from 'firebase-functions';
-import {handleError, successReport, errorReport} from './utilities';
+import {handleError, successReport, errorReport} from './utils/utilities';
 import admin = require('firebase-admin');
 import {subscribeToFlareSender, unsubscribeToFlareSender} from './accountManagementFunctions'
 

@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import {handleError, successReport, errorReport} from './utilities';
+import {handleError, successReport, errorReport} from './utils/utilities';
 import admin = require('firebase-admin');
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
 
