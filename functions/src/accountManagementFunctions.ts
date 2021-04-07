@@ -8,6 +8,7 @@ import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
 import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
 import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
+import { queryRecDocsRelatedToUser, queryRecDocsContainingUser } from './friendRecommendations';
 
 
 export const MAX_USERNAME_LENGTH = 30
@@ -290,6 +291,23 @@ export const updateNotificationPrefs = functions.https.onCall(
     }  
 });
 
+
+interface allPathsContainer {
+    userSnippetPath: string,
+    usernamePath: string,
+    savedLocationsPath: string,
+    userMetadataPath: string,
+    userSnippetExtrasPath: string,
+    activeBroadcastPaths: activeBroadcastPaths,
+    friendshipPaths: FriendshipRelatedPaths,
+    groupPaths: GroupsPaths,
+    maskPaths: MaskRelatedPaths,
+    cloudStoragePaths: CloudStoragePaths,
+    fcmRelatedPaths: FCMRelatedPaths,
+    recDocPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
+    recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>
+}
+
 //Gets all the paths that point to data relating to a user
 export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer> => {
     const allPaths = {} as any
@@ -297,6 +315,8 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     allPaths.savedLocationsPath = `savedLocations/${userUid}`
     allPaths.userSnippetExtrasPath = `userSnippetExtras/${userUid}`
     allPaths.userMetadataPath = `userMetadata/${userUid}`
+    allPaths.recDocPaths = queryRecDocsRelatedToUser(userUid)
+    allPaths.recDocContainingUserPaths = queryRecDocsContainingUser(userUid)
 
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
@@ -314,20 +334,7 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     return allPaths as allPathsContainer
 }
 
-interface allPathsContainer {
-    userSnippetPath: string,
-    usernamePath: string,
-    savedLocationsPath: string,
-    userMetadataPath: string,
-    userSnippetExtrasPath: string,
-    activeBroadcastPaths: activeBroadcastPaths,
-    friendshipPaths: FriendshipRelatedPaths,
-    groupPaths: GroupsPaths,
-    maskPaths: MaskRelatedPaths,
-    cloudStoragePaths: CloudStoragePaths,
-    fcmRelatedPaths: FCMRelatedPaths,
-}
-
+//TODO: out of date with current getAllPaths
 export const requestAllData = functions.https.onCall(
     async (_, context) => {
     try{
@@ -493,6 +500,15 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
         const bucket = admin.storage().bucket();
         await bucket.deleteFiles({prefix: allPaths.cloudStoragePaths.profilePictureDirectory})
     })())
+    
+    //TODO: should probably make this a batch write or something
+    const recDocs = await allPaths.recDocPaths.get()
+    recDocs.docs.forEach(d => {
+        promises.push(d.ref.delete())
+    })
+
+    //No need to user allPaths.recDocContainingUserPaths
+    //Since those docs will me cleaned up via triggers
 
     await Promise.all(promises)
     await database.ref().update(updates);
