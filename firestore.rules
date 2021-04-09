@@ -16,5 +16,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /friendRecommendations/{docName} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.uids;
+      allow write: if false;
+    }
+
   }
 }
