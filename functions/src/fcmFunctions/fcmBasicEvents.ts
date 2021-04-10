@@ -52,6 +52,7 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
             message.notification.title = `${senderDisplayName} made a flare!`
             message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
             message.data.causerUid = context.params.broadcasterUid
+            message.data.associatedFlareId = context.params.broadcastUid
             await fcmCore.sendFCMMessageToUsers(Object.keys(recepientList.direct), message)
         }
 
@@ -62,6 +63,7 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
             message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity} (via ${groupName} group)`
             message.data.causerUid = context.params.broadcasterUid
             message.data.groupUid = groupUid
+            message.data.associatedFlareId = context.params.broadcastUid
             await fcmCore.sendFCMMessageToUsers(recepients, message)
         }
 
@@ -106,6 +108,8 @@ export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{br
         message.data.reason = 'broadcastResponse'
         message.notification.title = `${snapshot.val().displayName} is in!`
         message.data.causerUid = context.params.newFriendUid
+        message.data.broadcasterUid = context.params.broadcasterUid
+        message.data.associatedFlareId = context.params.broadcastUid
         await fcmCore.sendFCMMessageToUsers([context.params.broadcasterUid], message)
     })
 
@@ -122,6 +126,7 @@ export const fcmChatNotification = functions.database.ref('activeBroadcasts/{bro
         message.notification.title = `Chat in ${flareInfo?.emoji} ${flareInfo?.activity}`
         message.data.causerUid = snapshot.val().user.id
         message.data.associatedFlareId = context.params.eventId
+        message.data.broadcasterUid = context.params.broadcasterUid
         const allChatRecepients = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/private/${context.params.eventId}/responderUids`).once("value")).val()
         if (!allChatRecepients) return;
         const respondersArray: string[] = [...Object.keys(allChatRecepients), context.params.broadcasterUid]

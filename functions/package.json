@@ -6,7 +6,6 @@
     "lint": "eslint -c .eslintrc.js --ext .ts .",
     "build": "sh bash_scripts/copy-res-files.sh && tsc",
     "deploy": "firebase deploy --only functions",
-
     "serve": "npm run build && firebase serve --only functions",
     "logs": "firebase functions:log"
   },
