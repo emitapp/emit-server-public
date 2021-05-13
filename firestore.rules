@@ -1,6 +1,6 @@
 rules_version = '2';
 //Firestore database is in complete lockdown
-//The data stored in Cloud Firestore (which is FCM token data)
+//The data stored in Cloud Firestore (which is FCM token data, user metadata and friend recs)
 //is managed entirely by the admin ADK and cloud functions
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -17,7 +17,7 @@ service cloud.firestore {
     }
 
     match /friendRecommendations/{docName} {
-      allow read: if request.auth != null && request.auth.uid in resource.data.uids;
+      allow read: if request.auth != null && (request.auth.uid in resource.data.uids || docName.matches(".*"+request.auth.uid+".*"));
       allow write: if false;
     }
 
