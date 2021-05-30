@@ -1,8 +1,9 @@
 import * as functions from 'firebase-functions';
-import { CompleteRecepientList } from '../activeBroadcastFunctions';
+import { CompleteRecepientList } from '../flares/privateFlares';
 import { objectDifference, truncate } from '../utils/utilities';
 import admin = require('firebase-admin');
 import * as fcmCore from './fcmCore'
+import {publicFlaresCol} from '../flares/publicFlares'
 
 const database = admin.database();
 
@@ -100,21 +101,21 @@ export const fcmAddedToGroup = functions.database.ref('/userGroups/{groupUid}/me
     })
 
 /**
- * Send an FCM message to a user when someone responds to one of ther broadcasts
+ * Send an FCM message to a user when someone responds to one of their private flares
  */
 export const fcmBroadcastResponse = functions.database.ref('activeBroadcasts/{broadcasterUid}/responders/{broadcastUid}/{newResponderUid}')
     .onCreate(async (snapshot, context) => {
         const message = fcmCore.generateFCMMessageObject()
         message.data.reason = 'broadcastResponse'
         message.notification.title = `${snapshot.val().displayName} is in!`
-        message.data.causerUid = context.params.newFriendUid
+        message.data.causerUid = context.params.newResponderUid
         message.data.broadcasterUid = context.params.broadcasterUid
         message.data.associatedFlareId = context.params.broadcastUid
         await fcmCore.sendFCMMessageToUsers([context.params.broadcasterUid], message)
     })
 
 /**
- * Send an FCM message when a chat comes in
+ * Send an FCM message when a chat comes in (for a private flare chat)
  */
 export const fcmChatNotification = functions.database.ref('activeBroadcasts/{broadcasterUid}/chats/{eventId}/{messageID}')
     .onCreate(async (snapshot, context) => {
@@ -135,5 +136,45 @@ export const fcmChatNotification = functions.database.ref('activeBroadcasts/{bro
     })
 
 
+/**
+ * Send an FCM message to a user when someone responds to one of their public flares
+ */
+export const fcmBroadcastResponsePublicFlare = functions.firestore.document("publicFlares/{flareUid}/responders/{responderUid}")
+    .onCreate(async (doc, context) => {
+        const message = fcmCore.generateFCMMessageObject()
+        message.data.reason = 'publicFlareResponse'
+        message.notification.title = `${doc.data().displayName} is in!`
+        message.data.causerUid = context.params.newFriendUid
+        message.data.broadcasterUid = doc.data().flareOwner
+        message.data.associatedFlareId = context.params.flareUid
+        await fcmCore.sendFCMMessageToUsers([doc.data().flareOwner], message)
+    });
+
+/**
+* Send an FCM message when a chat comes in (for a public flare chat)
+*/
+export const fcmChatNotificationPublicFlare = functions.database.ref('publicFlareChats/{flareUid}/{messageID}')
+    .onCreate(async (snapshot, context) => {
+        //Quick assignments
+        if (snapshot.val().system) return; //Don't send notifications for system type messages
+        const message = fcmCore.generateFCMMessageObject()
+        const {flareUid} = context.params 
+        const flareInfo = (await publicFlaresCol.doc(flareUid).get()).data()
+
+        //Composing message
+        message.data.reason = 'publicFlareChatMessage'
+        message.notification.body = snapshot.val().user.name + ": " + truncate(snapshot.val().text, 100)
+        message.notification.title = `Chat in ${flareInfo?.emoji} ${flareInfo?.activity}`
+        message.data.causerUid = snapshot.val().user.id
+        message.data.associatedFlareId = context.params.flareUid
+        message.data.broadcasterUid = flareInfo?.owner.uid
+        const allChatRecepients = flareInfo?.responders
+        if (!allChatRecepients) return;
+
+        //Sending message
+        const respondersArray: string[] = [...Object.keys(allChatRecepients), flareInfo?.owner.uid]
+        respondersArray.splice(respondersArray.indexOf(message.data.causerUid), 1)
+        await fcmCore.sendFCMMessageToUsers(respondersArray, message)
+    })
 
 

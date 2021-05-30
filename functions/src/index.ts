@@ -12,7 +12,6 @@ admin.initializeApp({
 });
 
 export * from './accountManagementFunctions';
-export * from './activeBroadcastFunctions';
 export * from './cloudStorageFunctions';
 export * from './devFunctions/dbMgmtFunctions/notificationManagement';
 export * from './devFunctions/testFunctions/notificationTests';
@@ -21,6 +20,10 @@ export * from './fcmFunctions/fcmReminders';
 export * from './friendMaskFunctions';
 export * from './friendRecommendations';
 export * from './friendRequestFunctions';
+export * from './flares/privateFlares';
+export * from './flares/publicFlares';
 export * from './statsFunctions/onNewUser';
 export * from './userGroupFunctions';
 export * from './userInviting';
+export * from './fcmFunctions/fcmCore';
+

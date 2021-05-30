@@ -1,11 +1,11 @@
 //TODO: Purge masks from this file (and the other files that link to it)
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
-import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from './utils/utilities';
-import {enqueueTask} from './utils/cloudTasks'
+import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from '../utils/utilities';
+import {enqueueTask} from '../utils/cloudTasks'
+import * as common from './common'
+import {geohashForLocation} from 'geofire-common'
 
-export const MAX_LOCATION_NAME_LENGTH = 100
-export const MAX_BROADCAST_NOTE_LENGTH = 500
 const logger = functions.logger
 
 interface BroadcastCreationRequest {
@@ -54,8 +54,6 @@ interface BroadcastConfirmationReq {
 }
 
 const database = admin.database()
-const FLARE_LIFETIME_CAP_MINS = 2879 //48 hours - 1 minute
-const TASKS_QUEUE = functions.config().env.broadcastCreation.autodelete_task_queue_name
 
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
@@ -88,7 +86,7 @@ export const createActiveBroadcast = functions.https.onCall(
         const absoluteStartingTime = deathTime
         deathTime += data.duration;
 
-        if (isNaN(deathTime) || deathTime > (Date.now() + FLARE_LIFETIME_CAP_MINS * 60000)){
+        if (isNaN(deathTime) || deathTime > (Date.now() + common.FLARE_LIFETIME_CAP_MINS * 60000)){
             throw errorReport(`Your flare can't last for more than 48 hours`);
         }
 
@@ -103,11 +101,11 @@ export const createActiveBroadcast = functions.https.onCall(
             throw errorReport(`Your broadcast has no recepients!`);
         }
 
-        if (data.note && data.note.length > MAX_BROADCAST_NOTE_LENGTH){
+        if (data.note && data.note.length > common.MAX_BROADCAST_NOTE_LENGTH){
             throw errorReport(`Broadcast note too long`);
         }
 
-        if (data.location && data.location.length > MAX_LOCATION_NAME_LENGTH){
+        if (data.location && data.location.length > common.MAX_LOCATION_NAME_LENGTH){
             throw errorReport(`Broadcast location name too long`);
         }
 
@@ -133,7 +131,11 @@ export const createActiveBroadcast = functions.https.onCall(
             ...(data.location ? { location: data.location } : {}),
             ...(data.note ? { note: truncate(data.note, 50) } : {})
         }
-        if (data.geolocation) feedBroadcastObject.geolocation = data.geolocation
+
+        if (data.geolocation) {
+            feedBroadcastObject.geolocation = data.geolocation
+            feedBroadcastObject.geoHash = geohashForLocation([data.geolocation.latitude, data.geolocation.longitude])
+        }
 
         const allRecepients = await generateRecepientObject(data, context.auth.uid)
 
@@ -154,15 +156,9 @@ export const createActiveBroadcast = functions.https.onCall(
         }
 
         //Making the flare's URL slug...
-        let unique = false
-        let slug = ""
-        while (!unique) { //FIXME: Potential point of woes haha. 
-            slug = makeFlareSlug(6)
-            const uniquenessCheck = await database.ref(`flareSlugs/${slug}`).once("value");
-            if (!uniquenessCheck.exists()) unique = true
-        }
+        const slug = await common.getAvailableFlareSlug(6)
 
-        updates[`flareSlugs/${slug}`] = {flareUid: newBroadcastUid, ownerUid: data.ownerUid, private: false }
+        updates[`flareSlugs/${slug}`] = {flareUid: newBroadcastUid, ownerUid: data.ownerUid, private: false, firestore: false }
         nulledPaths[`flareSlugs/${slug}`] = null
 
         //Active broadcasts are split into 4 sections
@@ -179,7 +175,7 @@ export const createActiveBroadcast = functions.https.onCall(
         //Identical to the feed object but it has the full note and a responder counter
         const broadcastPublicData = {
             ...feedBroadcastObject,
-            ...(data.note ? { note: data.note } : {}),
+            ...(data.note ? { note: data.note } : {}), //overwites the truncated note from feedBroadcastObject
             totalConfirmations: 0,
             slug,
             slugPrivate: false
@@ -220,7 +216,7 @@ export const createActiveBroadcast = functions.https.onCall(
 
         //Enqueueing the deletion task
         const payload: DeletionTaskPayload = { paths: nulledPaths}
-        const response = await enqueueTask(TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
+        const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
 
         //Then giving the broadcast it's deletion task's id (in case we want to cancel the scheduled deletion or something)
         updates[userBroadcastSection + "/private/" + newBroadcastUid].cancellationTaskPath = response.name
@@ -473,16 +469,6 @@ const isBroadcastRecepient = (broadcastRecepients : CompleteRecepientList, uid :
     }
     return false;
 }
-
-const makeFlareSlug = (length: number): string  => {
-    let result = '';
-    const characters = 'abcdefghijklmnopqrstuvwxyz';
-    const charactersLength = characters.length;
-    for (let i = 0; i < length; i ++) {
-      result += characters.charAt(Math.floor(Math.random() * charactersLength));
-    }
-    return result;
-  }
 
 //Gets paths to all the active braodcast data related to the user
 export interface activeBroadcastPaths {

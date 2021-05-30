@@ -1,7 +1,7 @@
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
 import {isOnlyWhitespace, errorReport, successReport, handleError} from './utils/utilities'
-import {getAllActiveBroadcastPaths, activeBroadcastPaths} from './activeBroadcastFunctions'
+import {getAllActiveBroadcastPaths, activeBroadcastPaths} from './flares/privateFlares'
 import {getCloudStoragePaths, CloudStoragePaths} from './cloudStorageFunctions'
 import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions/fcmCore'
 import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
