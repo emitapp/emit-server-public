@@ -26,4 +26,6 @@ export * from './statsFunctions/onNewUser';
 export * from './userGroupFunctions';
 export * from './userInviting';
 export * from './fcmFunctions/fcmCore';
+export * from './emailLists'
+
 
