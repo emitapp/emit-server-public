@@ -12,7 +12,7 @@ admin.initializeApp({
 });
 
 export * from './accountManagementFunctions';
-export * from './cloudStorageFunctions';
+export * from './profilePictureFunctions';
 export * from './devFunctions/dbMgmtFunctions/notificationManagement';
 export * from './devFunctions/testFunctions/notificationTests';
 export * from './fcmFunctions/fcmBasicEvents';

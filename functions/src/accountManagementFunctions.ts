@@ -2,7 +2,7 @@ import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
 import {isOnlyWhitespace, errorReport, successReport, handleError} from './utils/utilities'
 import {getAllActiveBroadcastPaths, activeBroadcastPaths} from './flares/privateFlares'
-import {getCloudStoragePaths, CloudStoragePaths} from './cloudStorageFunctions'
+import {deletePicFileOwnedByUid, getProfilePicPaths, ProfilePicPaths} from './profilePictureFunctions'
 import {getFCMRelatedPaths, FCMRelatedPaths} from './fcmFunctions/fcmCore'
 import {getAllMaskRelatedPaths, MaskRelatedPaths} from './friendMaskFunctions'
 import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequestFunctions'
@@ -302,7 +302,7 @@ interface allPathsContainer {
     friendshipPaths: FriendshipRelatedPaths,
     groupPaths: GroupsPaths,
     maskPaths: MaskRelatedPaths,
-    cloudStoragePaths: CloudStoragePaths,
+    profilePicRelatedPaths: ProfilePicPaths,
     fcmRelatedPaths: FCMRelatedPaths,
     recDocPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
     recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>
@@ -328,7 +328,7 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     promises.push(getAllFriendshipRelatedPaths(userUid).then(paths => allPaths.friendshipPaths = paths))
     promises.push(getAllGroupPaths(userUid).then(paths => allPaths.groupPaths = paths))
     promises.push(getAllMaskRelatedPaths(userUid).then(paths => allPaths.maskPaths = paths))
-    promises.push(getCloudStoragePaths(userUid).then(paths => allPaths.cloudStoragePaths = paths))
+    promises.push(getProfilePicPaths(userUid).then(paths => allPaths.profilePicRelatedPaths = paths))
     promises.push(getFCMRelatedPaths(userUid).then(paths => allPaths.fcmRelatedPaths = paths))
     await Promise.all(promises)
     return allPaths as allPathsContainer
@@ -496,10 +496,8 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
         await firestore.doc(allPaths.userMetadataPath).delete()
     })())
    
-    promises.push((async () => {
-        const bucket = admin.storage().bucket();
-        await bucket.deleteFiles({prefix: allPaths.cloudStoragePaths.profilePictureDirectory})
-    })())
+    promises.push(deletePicFileOwnedByUid(user.uid))
+    pushPath(allPaths.profilePicRelatedPaths.avatarSeed)
     
     //TODO: should probably make this a batch write or something
     const recDocs = await allPaths.recDocPaths.get()

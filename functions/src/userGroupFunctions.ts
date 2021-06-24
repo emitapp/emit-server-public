@@ -17,6 +17,7 @@ import {
   ExecutionStatus
 } from './utils/utilities';
 import {subscribeToFlareSender, unsubscribeToFlareSender } from './accountManagementFunctions'
+import { deletePicFileOwnedByUid } from './profilePictureFunctions';
 
 
 export const MAX_GROUP_NAME_LENGTH = 40
@@ -267,7 +268,10 @@ export const updateGroupMemberAndAdminCount = functions.database.ref('/userGroup
       .once("value")
     if (!currentMembers.exists()) { //Someone has removed all the members, so the group is to be deleted
       //Finish the deletion off by deleting the snippet
-      await database.ref(`/userGroups/${context.params.groupUid}/snippet`).remove()
+      await Promise.all([
+        database.ref(`/userGroups/${context.params.groupUid}/snippet`).remove(),
+        deletePicFileOwnedByUid(context.params.groupUid)
+      ])
     } else { //Recalculate member and admin counts
       let updates = {} as any
       let adminCount = 0
