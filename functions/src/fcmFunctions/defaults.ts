@@ -1,0 +1,7 @@
+export const DEFUALT_ON_CHAT_FCM_PREF = true
+export const DEFUALT_ON_FRIEND_REQ_FCM_PREF = true
+export const DEFUALT_ON_ADDED_GROUP_FCM_PREF = true
+export const DEFUALT_ON_NEW_FRIEND_FCM_PREF = true
+export const DEFUALT_ON_FLARE_RESPONSE_FCM_PREF = true
+export const DEFUALT_ON_NEARBY_PUBLIC_FLARE_FCM_PREF = true
+export const DEFAULT_FLARE_SUBSCRIPTION_LIST = []

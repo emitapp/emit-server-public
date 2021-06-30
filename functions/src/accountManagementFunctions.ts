@@ -9,7 +9,8 @@ import {getAllFriendshipRelatedPaths, FriendshipRelatedPaths} from './friendRequ
 import {getAllGroupPaths, GroupsPaths} from './userGroupFunctions'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
 import { queryRecDocsRelatedToUser, queryRecDocsContainingUser } from './friendRecommendations';
-
+import * as defaults from './fcmFunctions/defaults'
+import { getLocationDataPaths, LocationDataPaths } from './userLocationFunctions';
 
 export const MAX_USERNAME_LENGTH = 30
 export const MAX_DISPLAY_NAME_LENGTH = 35
@@ -31,7 +32,8 @@ export interface NotificationSettings {
     onNewFriend: boolean,
     onNewFriendRequest: boolean,
     onAddedToGroup: boolean,
-    onChat: boolean
+    onChat: boolean,
+    onNearbyPublicFlare: boolean
 }
 
 export interface AddFlareNotifRequest {
@@ -105,17 +107,19 @@ export const createSnippet = functions.https.onCall(
         });
 
         const promises = [] as Array<Promise<any>>
-        
+        const notificationPrefs : NotificationSettings = {
+            onBroadcastFrom: defaults.DEFAULT_FLARE_SUBSCRIPTION_LIST,
+            onNewBroadcastResponse: defaults.DEFUALT_ON_FLARE_RESPONSE_FCM_PREF,
+            onNewFriend: defaults.DEFUALT_ON_NEW_FRIEND_FCM_PREF,
+            onNewFriendRequest: defaults.DEFUALT_ON_FRIEND_REQ_FCM_PREF,
+            onAddedToGroup: defaults.DEFUALT_ON_ADDED_GROUP_FCM_PREF,
+            onChat: defaults.DEFUALT_ON_CHAT_FCM_PREF,
+            onNearbyPublicFlare: defaults.DEFUALT_ON_NEARBY_PUBLIC_FLARE_FCM_PREF
+        }
+
         promises.push(
             fcmDataRef.doc(context.auth.uid).set({
-                notificationPrefs:{
-                    onBroadcastFrom: [],
-                    onNewBroadcastResponse: true,
-                    onNewFriend: true,
-                    onNewFriendRequest: true,
-                    onAddedToGroup: true,
-                    onChat: true
-                },
+                notificationPrefs,
                 tokens: []
             })
         );
@@ -252,39 +256,62 @@ export const changeFlareSubscription = functions.https.onCall(
 export const updateNotificationPrefs = functions.https.onCall(
     async (data : NotificationSettings, context) => {
     try{
-        if (!context.auth) {
+        if (!context.auth) 
             throw errorReport("Authentication needed")
-        }
-           
-        if (typeof data.onAddedToGroup !== 'boolean'
-            || typeof data.onNewBroadcastResponse !== 'boolean'
-            || typeof data.onNewFriend !== 'boolean'
-            || typeof data.onNewFriendRequest !== 'boolean'
-            || typeof data.onChat !== 'boolean'){
-            throw errorReport("Invalid Arguments")
-        }
 
-        if (data.onBroadcastFrom instanceof Array) {
-            data.onBroadcastFrom.forEach(uid =>
+        if (! (data.onBroadcastFrom instanceof Array)) 
+            throw errorReport("Invalid Arguments")
+
+        data.onBroadcastFrom.forEach(uid =>
             {
-               if(typeof uid !== 'string' || uid.length > 50){
-                throw errorReport("Invalid Arguments")
-               }
+                if(typeof uid !== 'string' || uid.length > 50){
+                throw errorReport("Invalid Arguments: Malformed User Uid")
+                }
             })
-         }else{
-            throw errorReport("Invalid Arguments")
-         }
 
-        await fcmDataRef.doc(context.auth.uid).update({
-            notificationPrefs:{
-                onBroadcastFrom: data.onBroadcastFrom,
-                onNewBroadcastResponse: data.onNewBroadcastResponse,
-                onNewFriend: data.onNewFriend,
-                onNewFriendRequest: data.onNewFriendRequest,
-                onAddedToGroup: data.onAddedToGroup,
-                onChat: data.onChat
-            } 
-        });
+        //There should be a cleaner  way to do this but whatever
+        //I'll optimize it later ._.
+        if (typeof data.onNearbyPublicFlare != 'boolean') {
+            if (typeof data.onNearbyPublicFlare != "undefined") throw errorReport("Bad Arguments!")
+            data.onNearbyPublicFlare = defaults.DEFUALT_ON_NEARBY_PUBLIC_FLARE_FCM_PREF
+        }
+
+        if (typeof data.onAddedToGroup != 'boolean') {
+            if (typeof data.onAddedToGroup != "undefined") throw errorReport("Bad Arguments!")
+            data.onAddedToGroup = defaults.DEFUALT_ON_ADDED_GROUP_FCM_PREF
+        }
+
+        if (typeof data.onChat != 'boolean') {
+            if (typeof data.onChat != "undefined") throw errorReport("Bad Arguments!")
+            data.onChat = defaults.DEFUALT_ON_CHAT_FCM_PREF
+        }
+
+        if (typeof data.onNewFriendRequest != 'boolean') {
+            if (typeof data.onNewFriendRequest != "undefined") throw errorReport("Bad Arguments!")
+            data.onNewFriendRequest = defaults.DEFUALT_ON_FRIEND_REQ_FCM_PREF
+        }
+
+        if (typeof data.onNewBroadcastResponse != 'boolean') {
+            if (typeof data.onNewBroadcastResponse != "undefined") throw errorReport("Bad Arguments!")
+            data.onNewBroadcastResponse = defaults.DEFUALT_ON_FLARE_RESPONSE_FCM_PREF
+        }
+
+        if (typeof data.onNewFriend != 'boolean') {
+            if (typeof data.onNewFriend != "undefined") throw errorReport("Bad Arguments!")
+            data.onNewFriend = defaults.DEFUALT_ON_NEW_FRIEND_FCM_PREF
+        }
+         
+        const notificationPrefs : NotificationSettings = {
+            onBroadcastFrom: data.onBroadcastFrom,
+            onNewBroadcastResponse: data.onNewBroadcastResponse,
+            onNewFriend: data.onNewFriend,
+            onNewFriendRequest: data.onNewFriendRequest,
+            onAddedToGroup: data.onAddedToGroup,
+            onChat: data.onChat,
+            onNearbyPublicFlare: data.onNearbyPublicFlare
+        }
+
+        await fcmDataRef.doc(context.auth.uid).update({notificationPrefs})
         return successReport()
     }catch(err){
         return handleError(err)
@@ -305,7 +332,8 @@ interface allPathsContainer {
     profilePicRelatedPaths: ProfilePicPaths,
     fcmRelatedPaths: FCMRelatedPaths,
     recDocPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
-    recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>
+    recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
+    locationDataPaths: LocationDataPaths
 }
 
 //Gets all the paths that point to data relating to a user
@@ -330,6 +358,7 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     promises.push(getAllMaskRelatedPaths(userUid).then(paths => allPaths.maskPaths = paths))
     promises.push(getProfilePicPaths(userUid).then(paths => allPaths.profilePicRelatedPaths = paths))
     promises.push(getFCMRelatedPaths(userUid).then(paths => allPaths.fcmRelatedPaths = paths))
+    promises.push(getLocationDataPaths(userUid).then(paths => allPaths.locationDataPaths = paths))
     await Promise.all(promises)
     return allPaths as allPathsContainer
 }
@@ -487,6 +516,10 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
     pushPath(allPaths.savedLocationsPath)
     pushPath(allPaths.userSnippetExtrasPath)
     pushPath(allPaths.userSnippetPath)
+
+    pushPath(allPaths.locationDataPaths.locationDataPath)
+    pushPath(allPaths.locationDataPaths.locationGatheringPreferencePath)
+
 
     promises.push((async () => {
         await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete()

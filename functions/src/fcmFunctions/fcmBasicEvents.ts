@@ -3,7 +3,8 @@ import { CompleteRecepientList } from '../flares/privateFlares';
 import { objectDifference, truncate } from '../utils/utilities';
 import admin = require('firebase-admin');
 import * as fcmCore from './fcmCore'
-import {publicFlaresCol} from '../flares/publicFlares'
+import { publicFlaresCol } from '../flares/publicFlares'
+import { getUsersNearLocation, PUBLIC_FLARE_RADIUS_IN_M } from '../userLocationFunctions';
 
 const database = admin.database();
 
@@ -136,6 +137,25 @@ export const fcmChatNotification = functions.database.ref('activeBroadcasts/{bro
     })
 
 
+
+export const fcmNearbyPublicFlareNotification = functions.firestore.document('shortenedPublicFlares/{flareUid}')
+    .onCreate(async (snap, context) => {
+        const message = fcmCore.generateFCMMessageObject()
+        const flareInfo = snap.data()
+        message.data.reason = "nearbyPublicFlare"
+        message.notification.title = `Someone made a flare near you!`
+        message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity} \n Made by ${flareInfo?.owner?.displayName}`
+        message.data.causerUid = flareInfo?.owner?.uid
+        message.data.associatedFlareId = context.params.flareUid
+        message.data.broadcasterUid = flareInfo?.owner?.uid
+
+        const nearbyUserUids = await getUsersNearLocation(flareInfo.geolocation, PUBLIC_FLARE_RADIUS_IN_M)
+        const index = nearbyUserUids.indexOf(flareInfo?.owner?.uid);
+        if (index > -1) nearbyUserUids.splice(index, 1);
+        await fcmCore.sendFCMMessageToUsers(nearbyUserUids, message)
+    });
+
+
 /**
  * Send an FCM message to a user when someone responds to one of their public flares
  */
@@ -158,7 +178,7 @@ export const fcmChatNotificationPublicFlare = functions.database.ref('publicFlar
         //Quick assignments
         if (snapshot.val().system) return; //Don't send notifications for system type messages
         const message = fcmCore.generateFCMMessageObject()
-        const {flareUid} = context.params 
+        const { flareUid } = context.params
         const flareInfo = (await publicFlaresCol.doc(flareUid).get()).data()
 
         //Composing message
