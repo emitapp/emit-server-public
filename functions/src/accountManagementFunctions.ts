@@ -26,6 +26,13 @@ interface snippetCreationRequest{
     telephone?:string
 }
 
+export interface UserSnippet {
+    username: string,
+    usernameQuery: string,
+    displayName: string,
+    displayNameQuery: string
+}
+
 export interface NotificationSettings {
     onBroadcastFrom: Array<string>,
     onNewBroadcastResponse: boolean,

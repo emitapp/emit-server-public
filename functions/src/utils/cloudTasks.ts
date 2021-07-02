@@ -1,8 +1,5 @@
 import * as functions from 'firebase-functions';
-
-//@google-cloud/tasks doesn’t yet support import syntax at time of writing
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { CloudTasksClient } = require('@google-cloud/tasks')
+import { CloudTasksClient } from '@google-cloud/tasks'
 
 const TASKS_LOCATION = functions.config().env.broadcastCreation.tasks_location
 const FUNCTIONS_LOCATION = functions.config().env.broadcastCreation.functions_location
@@ -21,16 +18,17 @@ export const enqueueTask = async (
     queueName: string,
     callbackHttpFuncName: string,
     payload: Record<string, any>,
-    epochTimeInMillis: number) : Promise<any> => {
+    epochTimeInMillis: number): Promise<any> => {
 
     const tasksClient = new CloudTasksClient()
     const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
     const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, queueName)
     const callbackUrl = `https://${FUNCTIONS_LOCATION}-${project}.cloudfunctions.net/${callbackHttpFuncName}`
 
+
     const task = {
         httpRequest: {
-            httpMethod: 'POST',
+            httpMethod: "POST",
             url: callbackUrl,
             oidcToken: {
                 serviceAccountEmail,
@@ -46,6 +44,29 @@ export const enqueueTask = async (
         }
     }
 
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    //@ts-ignore
     const [response] = await tasksClient.createTask({ parent: queuePath, task })
+    return response
+}
+
+/**
+ * Deletes a Cloud task that's been previously queued
+ * @param name the cancellationTaskPath
+ */export const cancelTask = async (name: string): Promise<any> => {
+    const tasksClient = new CloudTasksClient()
+    await tasksClient.deleteTask({ name });
+}
+
+//TODO: Test what NOT_FOUND looks like
+//https://googleapis.dev/nodejs/tasks/latest/v2.CloudTasksClient.html#runTask
+//also https://stackoverflow.com/questions/25529290/node-js-module-how-to-get-list-of-exported-functions
+/**
+ * Instantly runs a Cloud task that's been previously queued
+ * @param name the cancellationTaskPath
+ */
+export const runTask = async (name: string): Promise<any> => {
+    const tasksClient = new CloudTasksClient()
+    const [response] = await tasksClient.runTask({ name });
     return response
 }

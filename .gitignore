@@ -73,3 +73,5 @@ functions/.runtimeconfig.json
 #Credential files for service accounts
 functions/lib/res/slack-sheets-credentials.json
 functions/src/res/slack-sheets-credentials.json
+
+.DS_Store
