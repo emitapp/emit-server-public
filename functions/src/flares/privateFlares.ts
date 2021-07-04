@@ -6,6 +6,7 @@ import { cancelTask, enqueueTask, runTask } from '../utils/cloudTasks'
 import * as common from './common'
 import { geohashForLocation } from 'geofire-common'
 import { UserSnippet } from '../accountManagementFunctions';
+import { FlareDays } from './common';
 
 const logger = functions.logger
 
@@ -27,6 +28,11 @@ interface BroadcastCreationRequest {
     friendRecepients: { [key: string]: boolean; },
     maskRecepients: { [key: string]: boolean; },
     groupRecepients: { [key: string]: boolean; },
+
+    //For recurrence
+    recurringDays: FlareDays[],
+    originalFlareUid?: string // only for recurring flares, used as a unique ID, never provided by user
+
 
     customMaxResponders: boolean,
 
@@ -79,7 +85,8 @@ interface PrivateFlareFeedElement {
     geolocation?: {
         latitude: number,
         longitude: number
-    }
+    },
+    recurringDays: FlareDays[]
 }
 
 interface UserSnippetWithUid extends UserSnippet {
@@ -91,6 +98,7 @@ interface PrivateFlarePublicData extends PrivateFlareFeedElement {
     totalConfirmations: number,
     slug: string,
     slugPrivate: boolean
+    recurringDays: FlareDays[]
 }
 
 interface PrivateFlareAdditionalData {
@@ -111,6 +119,7 @@ interface PrivateFlarePrivateData {
 
 const database = admin.database()
 
+
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
  */
@@ -126,12 +135,30 @@ export const createActiveBroadcast = functions.https.onCall(
             }
 
             validateBroadcast(data);
-            const newBroadcastUid = await createPrivateFlare(data, context);
+            const newBroadcastUid = await createPrivateFlare(data);
             return successReport({ flareUid: newBroadcastUid })
         } catch (err) {
             return handleError(err)
         }
     });
+
+
+/**
+* This function is called as a Cloud Task and merely serves as a wrapper
+* for createActiveBroadcast()
+*/
+export const createActiveBroadcastCloudTask =
+    functions.https.onRequest(async (req, res) => {
+        try {
+            validateBroadcast(req.body)
+            await createPrivateFlare(req.body)
+            res.sendStatus(200)
+        } catch (error) {
+            logger.error("createPublicFlareCloudTask error", error)
+            res.status(500).send(error)
+        }
+
+    })
 
 /**
  * This edits an existing broadcast and propagates the change to other users as well
@@ -148,7 +175,7 @@ export const modifyActiveBroadcast = functions.https.onCall(
             }
 
             validateBroadcast(data);
-            const broadcastUid = await editPrivateFlare(data, context)
+            const broadcastUid = await editPrivateFlare(data)
             return successReport({ flareUid: broadcastUid })
         } catch (err) {
             return handleError(err)
@@ -177,10 +204,7 @@ const validateBroadcast = (data: BroadcastCreationRequest) => {
     }
 }
 
-const createPrivateFlare = async (data: BroadcastCreationRequest, context: functions.https.CallableContext, isNewBroadcast = false): Promise<string | null | undefined> => {
-    if (!context.auth) {
-        throw errorReport("Authentication Needed")
-    }
+const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<string | null | undefined> => {
 
     //Setting things up for the batch write
     const updates = {} as Record<string, any>;
@@ -206,12 +230,12 @@ const createPrivateFlare = async (data: BroadcastCreationRequest, context: funct
     const feedBroadcastObject = generateFeedObject(data, deathTime, startingTime, owner)
 
     //Now populating people's feeds
-    const allRecepients = await generateRecepientObject(data, context.auth.uid)
+    const allRecepients = await generateRecepientObject(data, data.ownerUid)
     writeToFeeds(updates, nulledPaths, broadcastUid, feedBroadcastObject, allRecepients)
 
     const {
-        broadcastPublicData, 
-        broadcastAdditionalParams, 
+        broadcastPublicData,
+        broadcastAdditionalParams,
         broadcastPrivateData
     } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid)
 
@@ -228,16 +252,33 @@ const createPrivateFlare = async (data: BroadcastCreationRequest, context: funct
     const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
     updates[userBroadcastSection + "/private/" + broadcastUid].cancellationTaskPath = response.name
 
+    // If flare is recurring, enqueue the createPublicFlareCloudTask
+    if (data.recurringDays?.length > 0) {
+
+        if (!data.originalFlareUid) {
+            data.originalFlareUid = broadcastUid
+        }
+
+        // enqueue next task
+        const nextExecutionTime = common.computeNextExecutionTime(data.recurringDays, startingTime)
+        const cloudTaskResponse = await enqueueTask(common.TASKS_QUEUE, "createActiveBroadcastCloudTask", data, nextExecutionTime)
+
+        // maintain unique identifier for recurring flares as the original flare id, as the flare
+        // id changes each time this function is called
+        updates[`recurringFlares/${data.ownerUid}/${data.originalFlareUid}`] = {
+            ...feedBroadcastObject,
+            originalFlareUid: data.originalFlareUid,
+            frequency: data.recurringDays.join("/"),
+            cloudTaskName: cloudTaskResponse.name
+        }
+    }
+
     //And lastly, doing the batch writes
     await database.ref().update(updates);
     return broadcastUid
 }
 
-const editPrivateFlare = async (data: BroadcastCreationRequest, context: functions.https.CallableContext, isNewBroadcast = false): Promise<string | null | undefined> => {
-    if (!context.auth) {
-        throw errorReport("Authentication Needed")
-    }
-
+const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string | null | undefined> => {
     if (!data.broadcastUid) {
         throw errorReport("No Uid provided!")
     }
@@ -274,24 +315,24 @@ const editPrivateFlare = async (data: BroadcastCreationRequest, context: functio
 
     //Making the object that will actually be in people's feeds
     const feedBroadcastObject = generateFeedObject(data, newDeathTime, newStartingTime, owner)
-    const allRecepients = await generateRecepientObject(data, context.auth.uid)
+    const allRecepients = await generateRecepientObject(data, publicData.owner.uid)
     writeToFeeds(updates, nulledPaths, broadcastUid, feedBroadcastObject, allRecepients)
 
     const {
-        broadcastPublicData, 
-        broadcastAdditionalParams, 
+        broadcastPublicData,
+        broadcastAdditionalParams,
         broadcastPrivateData
     } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid)
-    
+
     const responderUidsSnapshot = await database.ref(`activeBroadcasts/${owner.uid}/private/${broadcastUid}/responderUids`).once('value');
     const responderUids = responderUidsSnapshot.val() || {}
     broadcastPrivateData.responderUids = responderUids
 
-        // Need to explicitly delete the flare from the feeds of people who have been removed from the reciepient list
+    // Need to explicitly delete the flare from the feeds of people who have been removed from the reciepient list
     // FIXME: can make total confirmations count inaccurate, should move that logic to a trigger eventually
     // I also shouldn't be messing with responderUids directly outside of its main trigger func
     let newResponderCount = Object.keys(responderUids).length
-    
+
     for (const friendUid of data.friendsToRemove) {
         updates[`activeBroadcasts/${owner.uid}/responders/${broadcastUid}/${friendUid}`] = null
         if (responderUids[friendUid]) newResponderCount -= 1;
@@ -319,7 +360,7 @@ const editPrivateFlare = async (data: BroadcastCreationRequest, context: functio
     //order is particularly important here.
     //we only want to cancel the old task if we already successfully made the new one
     const payload: DeletionTaskPayload = { paths: nulledPaths }
-    const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, newDeathTime)    
+    const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, newDeathTime)
     updates[userBroadcastSection + "/private/" + broadcastUid].cancellationTaskPath = response.name
     await cancelTask(cancellationTaskPath)
 
@@ -636,7 +677,7 @@ const generateRecepientObject =
         // numerous groups!) and also be a direct recepient
         allRecepients.totalRecepients = allRecepients.totalDirectRecepients + allRecepients.totalGroupRecepients
         return allRecepients;
-}
+    }
 
 
 const isBroadcastRecepient = (broadcastRecepients: CompleteRecepientList, uid: string): boolean => {
@@ -686,7 +727,8 @@ const generateFeedObject = (data: BroadcastCreationRequest, deathTime: number, s
         activity: data.activity,
         emoji: data.emoji,
         ...(data.location ? { location: data.location } : {}),
-        ...(data.note ? { note: truncate(data.note, 50) } : {})
+        ...(data.note ? { note: truncate(data.note, 50) } : {}),
+        recurringDays: data.recurringDays
     }
 
     if (data.geolocation) {
@@ -721,12 +763,12 @@ const writeToFeeds = (
 
 
 const makePrivateFlareMetadata = (
-    data: BroadcastCreationRequest, 
-    feedObject: PrivateFlareFeedElement, 
+    data: BroadcastCreationRequest,
+    feedObject: PrivateFlareFeedElement,
     slug: string,
     allRecepients: CompleteRecepientList,
     flareUid: string
-    ) => {
+) => {
 
     //Active broadcasts are split into 4 sections
     //private (/private) data (only the server should really read and write, though the 
@@ -742,15 +784,16 @@ const makePrivateFlareMetadata = (
     //Note that none of these is the object that's going into people's feeds
 
     //Identical to the feed object but it has the full note and a responder counter
-    const broadcastPublicData  : PrivateFlarePublicData  = {
+    const broadcastPublicData: PrivateFlarePublicData = {
         ...feedObject,
         ...(data.note ? { note: data.note } : {}), //overwites the truncated note from feedBroadcastObject
         totalConfirmations: 0,
         slug,
-        slugPrivate: false
+        slugPrivate: false,
+        recurringDays: data.recurringDays
     }
 
-    const broadcastAdditionalParams : PrivateFlareAdditionalData = {
+    const broadcastAdditionalParams: PrivateFlareAdditionalData = {
         allFriends: data.allFriends,
         friendRecepients: data.friendRecepients,
         groupRecepients: data.groupRecepients,
@@ -758,7 +801,7 @@ const makePrivateFlareMetadata = (
         ...(data.maxResponders ? { maxResponders: data.maxResponders } : {})
     }
 
-    const broadcastPrivateData : PrivateFlarePrivateData= {
+    const broadcastPrivateData: PrivateFlarePrivateData = {
         cancellationTaskPath: "",
         recepientUids: allRecepients,
         confirmationCap: data.maxResponders || null,
@@ -781,5 +824,5 @@ const makePrivateFlareMetadata = (
         }
     }
 
-    return {broadcastPublicData, broadcastPrivateData, broadcastAdditionalParams}
+    return { broadcastPublicData, broadcastPrivateData, broadcastAdditionalParams }
 }

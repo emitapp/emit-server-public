@@ -9,6 +9,7 @@ import { errorReport, handleError, isOnlyWhitespace, successReport, truncate } f
 import * as common from './common';
 import admin = require('firebase-admin');
 import {geohashForLocation} from 'geofire-common'
+import { FlareDays } from './common';
 
 
 interface PublicFlareCreationRequest {
@@ -26,6 +27,8 @@ interface PublicFlareCreationRequest {
   tags?: string[],
   note?: string,
   maxResponders?: number,
+  recurringDays: FlareDays[],
+  originalFlareUid?: string // only for recurring flares, used as a unique ID, never provided by user
 }
 
 interface PublicFlareDeletionTaskPayload {
@@ -45,15 +48,46 @@ const shortPubFlareCol = firestore.collection("shortenedPublicFlares")
 const logger = functions.logger
 
 
+
+
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
  */
-export const createPublicFlare = functions.https.onCall(
+ export const createPublicFlare = functions.https.onCall(
   async (data: PublicFlareCreationRequest, context) => {
     try {
       // Basic checks
       if (!context.auth) throw errorReport("Authentication Needed")
       if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doens\'t match')
+
+      const flareUid = await createPublicFlareHelper(data)
+      return successReport({ flareUid: flareUid })
+    } catch (err) {
+      return handleError(err)
+    }
+  });
+
+/**
+ * This function is called as a Cloud Task and merely serves as a wrapper
+ * for createPublicFlare()
+ */
+export const createPublicFlareCloudTask =
+  functions.https.onRequest(async (req, res) => {
+    try {
+      await createPublicFlareHelper(req.body)
+      res.sendStatus(200)
+    } catch (error) {
+      logger.error("createPublicFlareCloudTask error", error)
+      res.status(500).send(error)
+    }
+  })
+
+/**
+ * Helper function for createPublicFlareCloudTask and createPublicFlare
+ * handles core logic of creating a public flare
+ */
+export const createPublicFlareHelper = async (data: PublicFlareCreationRequest) : Promise<string> => {
+    try {
       if (!data.duration) throw errorReport("Invalid duration");
       if (!data.emoji || !data.activity) throw errorReport(`Invalid activity`);
 
@@ -99,7 +133,8 @@ export const createPublicFlare = functions.https.onCall(
         emoji: data.emoji,
         ...(data.location ? { location: data.location } : {}),
         ...(data.note ? { note: truncate(data.note, 50) } : {}),
-        ...(data.tags ? { tags: data.tags } : {})
+        ...(data.tags ? { tags: data.tags } : {}),
+        recurringDays: data.recurringDays
       }
 
       if (data.geolocation) {
@@ -123,7 +158,7 @@ export const createPublicFlare = functions.https.onCall(
         totalConfirmations: 0,
         responders: [], //FIXME: is this a good idea? not sure
         slug: flareSlug,
-        slugPrivate: false
+        slugPrivate: false,
       }
 
       //Enqueueing the deletion task
@@ -136,6 +171,27 @@ export const createPublicFlare = functions.https.onCall(
         confirmationCap: data.maxResponders || null
       }
 
+      // If flare is recurring, enqueue the createPublicFlareCloudTask
+      if (data.recurringDays?.length > 0) {
+
+        if (!data.originalFlareUid) {
+          data.originalFlareUid = flareUid
+        }
+
+        // enqueue next task
+        const nextExecutionTime = common.computeNextExecutionTime(data.recurringDays, absoluteStartingTime)
+        const cloudTaskResponse = await enqueueTask(common.TASKS_QUEUE, "createPublicFlareCloudTask", data, nextExecutionTime)
+
+        // maintain unique identifier for recurring flares as the original flare id, as the flare
+        // id changes each time this function is called
+        rtdbAdditions[`recurringFlares/${data.ownerUid}/${data.originalFlareUid}`] = {
+          ...shortenedFlareObject,
+          originalFlareUid: data.originalFlareUid,
+          frequency: data.recurringDays.join("/"),
+          cloudTaskName: cloudTaskResponse.name
+        }
+      }
+
       //Doing the writes...
       promises.push(publicFlaresCol.doc(flareUid).set(fullFlareObject))
       promises.push(shortPubFlareCol.doc(flareUid).set(shortenedFlareObject))
@@ -143,11 +199,11 @@ export const createPublicFlare = functions.https.onCall(
       promises.push(database.ref().update(rtdbAdditions));
       await Promise.all(promises)
 
-      return successReport({ flareUid: flareUid })
+      return flareUid
     } catch (err) {
       return handleError(err)
     }
-  });
+  }
 
 
 

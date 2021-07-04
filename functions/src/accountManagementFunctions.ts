@@ -11,6 +11,8 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 import { queryRecDocsRelatedToUser, queryRecDocsContainingUser } from './friendRecommendations';
 import * as defaults from './fcmFunctions/defaults'
 import { getLocationDataPaths, LocationDataPaths } from './userLocationFunctions';
+import { deleteAllRecurringFlaresForUser } from './flares/common';
+
 
 export const MAX_USERNAME_LENGTH = 30
 export const MAX_DISPLAY_NAME_LENGTH = 35
@@ -327,6 +329,7 @@ export const updateNotificationPrefs = functions.https.onCall(
 
 
 interface allPathsContainer {
+    recurringFlaresPath: string,
     userSnippetPath: string,
     usernamePath: string,
     savedLocationsPath: string,
@@ -418,6 +421,7 @@ export const requestAllData = functions.https.onCall(
         pushPath(allPaths.usernamePath)
         pushPath(allPaths.savedLocationsPath)
         pushPath(allPaths.userSnippetExtrasPath)
+
     
         promises.push((async () => {
             let data = (await database.ref(allPaths.userSnippetPath).once("value")).val()
@@ -523,6 +527,7 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
     pushPath(allPaths.savedLocationsPath)
     pushPath(allPaths.userSnippetExtrasPath)
     pushPath(allPaths.userSnippetPath)
+    pushPath(allPaths.recurringFlaresPath)
 
     pushPath(allPaths.locationDataPaths.locationDataPath)
     pushPath(allPaths.locationDataPaths.locationGatheringPreferencePath)
@@ -544,6 +549,8 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
     recDocs.docs.forEach(d => {
         promises.push(d.ref.delete())
     })
+
+    promises.push((async () => { await deleteAllRecurringFlaresForUser(user.uid) })())
 
     //No need to user allPaths.recDocContainingUserPaths
     //Since those docs will me cleaned up via triggers

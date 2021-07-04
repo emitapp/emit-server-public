@@ -23,6 +23,7 @@ export * from './friendRequestFunctions';
 export * from './flares/privateFlares';
 export * from './flares/publicFlares';
 export * from './statsFunctions/onNewUser';
+export * from './flares/common';
 export * from './userGroupFunctions';
 export * from './userInviting';
 export * from './fcmFunctions/fcmCore';
