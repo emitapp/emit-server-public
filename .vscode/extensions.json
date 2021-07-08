@@ -3,6 +3,8 @@
         "toba.vsfire",
         "dbaeumer.vscode-eslint",
         "eamodio.gitlens",
-        "gruntfuggly.todo-tree"
+        "gruntfuggly.todo-tree",
+        "streetsidesoftware.code-spell-checker",
+        "aaron-bond.better-comments"
     ]
 }
