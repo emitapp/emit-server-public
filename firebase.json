@@ -26,23 +26,5 @@
     ],
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
-  },
-  "hosting": {
-    "public": "hosting/build",
-    "predeploy": [
-      "sh bash_scripts/deploy-confirmation.sh",
-      "cd hosting && npm run build && cd .."
-    ],
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
   }
 }
