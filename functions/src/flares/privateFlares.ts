@@ -41,15 +41,21 @@ interface BroadcastCreationRequest {
     friendsToRemove: string[],
     groupsToRemove: string[]
 }
-
 interface DeletionRequest {
     uid: string,
     ownerUid: string
 }
 
 interface DeletionTaskPayload {
-    paths: { [key: string]: null }
+    flareUid: string
 }
+
+interface FlareDeletionDoc {
+    paths: string[]
+}
+
+type userUid = string
+export type AssociatedFlaresRecord = Record<string, userUid>
 
 export interface CompleteRecepientList {
     direct: { [key: string]: boolean; },
@@ -63,7 +69,7 @@ export interface CompleteRecepientList {
 
 interface RecepientGroupInfo {
     groupName: string,
-    members: { [key: string]: boolean; }
+    members: { [key: string]: true; }
 }
 
 interface BroadcastConfirmationReq {
@@ -71,7 +77,6 @@ interface BroadcastConfirmationReq {
     broadcasterUid: string,
     attendOrRemove: boolean
 }
-
 interface PrivateFlareFeedElement {
     owner: UserSnippetWithUid,
     deathTimestamp: number,
@@ -86,19 +91,26 @@ interface PrivateFlareFeedElement {
         latitude: number,
         longitude: number
     },
-    recurringDays: FlareDays[]
+    groupInfo?: {
+        name: string,
+        uid: string
+    }
+    recurringDays: FlareDays[] | false,
+
+    status?: "confirmed" | "cancelled"
 }
+
+//TODO: consider eventually using https://github.com/kimamula/ts-transformer-keys and https://github.com/nonara/ts-patch
+type KeysEnum<T> = { [P in keyof Required<T>]: true };
 
 interface UserSnippetWithUid extends UserSnippet {
     uid: string
 }
 
-
-interface PrivateFlarePublicData extends PrivateFlareFeedElement {
+interface PrivateFlarePublicData extends Omit<PrivateFlareFeedElement, "groupInfo" | "status"> {
     totalConfirmations: number,
     slug: string,
     slugPrivate: boolean
-    recurringDays: FlareDays[]
 }
 
 interface PrivateFlareAdditionalData {
@@ -115,9 +127,12 @@ interface PrivateFlarePrivateData {
     confirmationCap: number | null,
     ga_analytics: Record<string, any>,
     responderUids: Record<string, true | null>,
+    exampleFeedObject: PrivateFlareFeedElement
 }
 
 const database = admin.database()
+const firestore = admin.firestore();
+export const deletionPathCollection = firestore.collection("privateFlareDeletionPaths")
 
 
 /**
@@ -208,7 +223,7 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
 
     //Setting things up for the batch write
     const updates = {} as Record<string, any>;
-    const nulledPaths = {} as Record<string, null>; //Needed for the deletion cloud task
+    const pathsToDelete: string[] = []; //Needed for the deletion cloud task
 
     const userBroadcastSection = `activeBroadcasts/${data.ownerUid}`
     const broadcastUid = (await database.ref(userBroadcastSection).push()).key as string
@@ -216,7 +231,7 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
     // Don't need to change slug if it's an edited broadcast
     const slug = await common.getAvailableFlareSlug(6)
     const slugInfo = { flareUid: broadcastUid, ownerUid: data.ownerUid, private: false, firestore: false }
-    addWriteDelete(updates, nulledPaths, `flareSlugs/${slug}`, slugInfo)
+    addWriteDelete(updates, pathsToDelete, `flareSlugs/${slug}`, slugInfo)
 
     const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
     if (!ownerSnippetSnapshot.exists()) {
@@ -231,7 +246,8 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
 
     //Now populating people's feeds
     const allRecepients = await generateRecepientObject(data, data.ownerUid)
-    writeToFeeds(updates, nulledPaths, broadcastUid, feedBroadcastObject, allRecepients)
+    writeToFeeds(updates, pathsToDelete, broadcastUid, feedBroadcastObject, allRecepients)
+    associateFlareWithGroups(updates, pathsToDelete, broadcastUid, data.ownerUid, allRecepients)
 
     const {
         broadcastPublicData,
@@ -240,15 +256,15 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
     } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid)
 
 
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/public/" + broadcastUid, broadcastPublicData)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/additionalParams/" + broadcastUid, broadcastAdditionalParams)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/private/" + broadcastUid, broadcastPrivateData)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/responders/" + broadcastUid)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/chats/" + broadcastUid)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/public/" + broadcastUid, broadcastPublicData)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/additionalParams/" + broadcastUid, broadcastAdditionalParams)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/private/" + broadcastUid, broadcastPrivateData)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/responders/" + broadcastUid)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/chats/" + broadcastUid)
 
     //Enqueueing the deletion task
     //Then giving the broadcast it's deletion task's id (in case we want to cancel the scheduled deletion or something)
-    const payload: DeletionTaskPayload = { paths: nulledPaths }
+    const payload: DeletionTaskPayload = { flareUid: broadcastUid }
     const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
     updates[userBroadcastSection + "/private/" + broadcastUid].cancellationTaskPath = response.name
 
@@ -274,6 +290,8 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
     }
 
     //And lastly, doing the batch writes
+    const deletionDocPayload: FlareDeletionDoc = { paths: pathsToDelete }
+    await deletionPathCollection.doc(broadcastUid).set(deletionDocPayload)
     await database.ref().update(updates);
     return broadcastUid
 }
@@ -285,7 +303,7 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
 
     //Setting things up for the batch write
     const updates = {} as Record<string, any>;
-    const nulledPaths = {} as Record<string, null>; //Needed for the deletion cloud task
+    const pathsToDelete: string[] = []; //Needed for the deletion cloud task
 
     const userBroadcastSection = `activeBroadcasts/${data.ownerUid}`
 
@@ -309,14 +327,15 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
 
     //Presering flare information
     const slug = publicData.slug
-    addWriteDelete(updates, nulledPaths, `flareSlugs/${slug}`)
+    addWriteDelete(updates, pathsToDelete, `flareSlugs/${slug}`)
 
     const { startingTime: newStartingTime, deathTime: newDeathTime } = calculateFlareTimeVariables(data)
 
     //Making the object that will actually be in people's feeds
     const feedBroadcastObject = generateFeedObject(data, newDeathTime, newStartingTime, owner)
     const allRecepients = await generateRecepientObject(data, publicData.owner.uid)
-    writeToFeeds(updates, nulledPaths, broadcastUid, feedBroadcastObject, allRecepients)
+    writeToFeeds(updates, pathsToDelete, broadcastUid, feedBroadcastObject, allRecepients, false)
+    associateFlareWithGroups(updates, pathsToDelete, broadcastUid, data.ownerUid, allRecepients)
 
     const {
         broadcastPublicData,
@@ -340,6 +359,7 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
         updates[`feeds/${friendUid}/${broadcastUid}`] = null
     }
 
+    disassociateFlareWithGroups(updates, pathsToDelete, broadcastUid, data.ownerUid, data.groupsToRemove)
     for (const groupUid of data.groupsToRemove) {
         for (const memberUid in privateData.recepientUids.groups[groupUid].members) {
             updates[`activeBroadcasts/${owner.uid}/responders/${broadcastUid}/${memberUid}`] = null
@@ -351,20 +371,22 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
 
     //TODO: this should eventually just be handled with triggers. Its cleaner, set it and forget it.
     broadcastPublicData.totalConfirmations = newResponderCount;
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/public/" + broadcastUid, broadcastPublicData)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/additionalParams/" + broadcastUid, broadcastAdditionalParams)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/private/" + broadcastUid, broadcastPrivateData)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/responders/" + broadcastUid)
-    addWriteDelete(updates, nulledPaths, userBroadcastSection + "/chats/" + broadcastUid)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/public/" + broadcastUid, broadcastPublicData)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/additionalParams/" + broadcastUid, broadcastAdditionalParams)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/private/" + broadcastUid, broadcastPrivateData)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/responders/" + broadcastUid)
+    addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/chats/" + broadcastUid)
 
     //order is particularly important here.
     //we only want to cancel the old task if we already successfully made the new one
-    const payload: DeletionTaskPayload = { paths: nulledPaths }
+    const payload: DeletionTaskPayload = { flareUid: broadcastUid }
     const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, newDeathTime)
     updates[userBroadcastSection + "/private/" + broadcastUid].cancellationTaskPath = response.name
     await cancelTask(cancellationTaskPath)
 
     //And lastly, doing the batch writes
+    const deletionDocPayload: FlareDeletionDoc = { paths: pathsToDelete }
+    await deletionPathCollection.doc(broadcastUid).set(deletionDocPayload)
     await database.ref().update(updates);
     return broadcastUid
 }
@@ -405,8 +427,17 @@ export const autoDeleteBroadcast =
 
         const payload = req.body as DeletionTaskPayload
         try {
-            await database.ref().update(payload.paths);
-            res.sendStatus(200)
+            const paths = await deletionPathCollection.doc(payload.flareUid).get()
+            if (!paths.exists) {
+                res.status(500).send("No associated flare deletion doc for uid " + payload.flareUid)
+            } else {
+                const docData: FlareDeletionDoc = paths.data() as FlareDeletionDoc
+                const nulledPaths: Record<string, null> = {}
+                for (const path of docData.paths) nulledPaths[path] = null
+                await database.ref().update(nulledPaths);
+                await deletionPathCollection.doc(payload.flareUid).delete() 
+                res.sendStatus(200)
+            }
         }
         catch (error) {
             logger.error("autoDeleteBroadcast error", error)
@@ -710,11 +741,11 @@ const calculateFlareTimeVariables = (data: BroadcastCreationRequest) => {
 
 const addWriteDelete = (
     writeObject: Record<string, any>,
-    nullObject: Record<string, null>,
+    pathsToDelete: string[],
     path: string,
     value?: any) => {
     if (typeof value != "undefined") writeObject[path] = value
-    nullObject[path] = null
+    pathsToDelete.push(path)
 }
 
 
@@ -728,7 +759,7 @@ const generateFeedObject = (data: BroadcastCreationRequest, deathTime: number, s
         emoji: data.emoji,
         ...(data.location ? { location: data.location } : {}),
         ...(data.note ? { note: truncate(data.note, 50) } : {}),
-        recurringDays: data.recurringDays
+        recurringDays: data.recurringDays?.length > 0 ? data.recurringDays : false
     }
 
     if (data.geolocation) {
@@ -741,24 +772,124 @@ const generateFeedObject = (data: BroadcastCreationRequest, deathTime: number, s
 
 const writeToFeeds = (
     writeObject: Record<string, any>,
-    nullObject: Record<string, null>,
-    uid: string,
+    pathsToDelete: string[],
+    flareUid: string,
     feedObject: PrivateFlareFeedElement,
-    allRecepients: CompleteRecepientList) => {
+    allRecepients: CompleteRecepientList,
+    canOverwriteStatus = true) => {
     //The way we're doing this, broadcasts sent via groups will overwrite
     //broadcasts sent via direct uids or masks (if someone got a broadcast via both)
     for (const friendUid in allRecepients.direct) {
-        writeObject[`feeds/${friendUid}/${uid}`] = feedObject
-        nullObject[`feeds/${friendUid}/${uid}`] = null
+        if (canOverwriteStatus) addWriteDelete(writeObject, pathsToDelete, `feeds/${friendUid}/${flareUid}`, feedObject)
+        else writeToFeedWithoutOverwritingStatus(writeObject, feedObject, pathsToDelete, flareUid, friendUid)
     }
 
     for (const groupUid in allRecepients.groups) {
         const groupInfo = { name: allRecepients.groups[groupUid].groupName, uid: groupUid }
         for (const memberUid in allRecepients.groups[groupUid].members) {
-            writeObject[`feeds/${memberUid}/${uid}`] = { ...feedObject, groupInfo }
-            nullObject[`feeds/${memberUid}/${uid}`] = null
+            if (canOverwriteStatus) addWriteDelete(writeObject, pathsToDelete, `feeds/${memberUid}/${flareUid}`, { ...feedObject, groupInfo })
+            else writeToFeedWithoutOverwritingStatus(writeObject, feedObject, pathsToDelete, flareUid, memberUid, groupInfo)
         }
     }
+}
+
+interface GroupInfoForWriteToFeedWithoutOverwritingStatus{
+    uid: string,
+    name: string
+}
+//TODO: Bruh I really don't like this, really increases the stuff to write by a lot...
+//This is just more evidence that we have to really rewrite this whole private flare logic eventually.
+const writeToFeedWithoutOverwritingStatus = (
+    writeObject: Record<string, any>,
+    feedObject: PrivateFlareFeedElement,
+    pathsToDelete: string[],
+    flareUid: string,
+    recipientUid: string,
+    groupInfo?: GroupInfoForWriteToFeedWithoutOverwritingStatus
+) => {
+
+    const privateFlareFeedElementKeys: KeysEnum<Omit<PrivateFlareFeedElement, "status">> = {
+        owner: true,
+        deathTimestamp: true,
+        duration: true,
+        startingTime: true,
+        activity: true,
+        emoji: true,
+        location: true,
+        note: true,
+        geoHash: true,
+        geolocation: true,
+        groupInfo: true,
+        recurringDays: true,
+    };
+
+    for (const flareFeedKey in privateFlareFeedElementKeys) {
+        const path = `feeds/${recipientUid}/${flareUid}/${flareFeedKey}`
+        let value: unknown = feedObject[flareFeedKey as keyof PrivateFlareFeedElement]
+        if (typeof value == "undefined") value = null
+        writeObject[path] = value
+    }
+    if (groupInfo) writeObject[`feeds/${recipientUid}/${flareUid}/groupInfo`] = {name: groupInfo.name, uid: groupInfo.uid}
+    pathsToDelete.push(`feeds/${recipientUid}/${flareUid}`)
+}
+
+const associateFlareWithGroups = (
+    writeObject: Record<string, any>,
+    pathsToDelete: string[],
+    broadcastUid: string,
+    broadcasterUid: userUid,
+    recipients: CompleteRecepientList) => {
+    for (const groupUid in recipients.groups) {
+        addWriteDelete(writeObject, pathsToDelete, `groupsWithAssociatedFlares/${groupUid}/${broadcastUid}`, broadcasterUid)
+    }
+}
+
+const disassociateFlareWithGroups = (
+    writeObject: Record<string, any>,
+    pathsToDelete: string[],
+    broadcastUid: string,
+    broadcasterUid: userUid,
+    groupsToRemove: string[]) => {
+    for (const groupUid of groupsToRemove) {
+        addWriteDelete(writeObject, pathsToDelete, `groupsWithAssociatedFlares/${groupUid}/${broadcastUid}`, broadcasterUid)
+    }
+}
+
+/**
+ * This is only designed for use when the new recepient is being added because they got added to a group
+ * this flare was sent to 
+ * @param flareUid 
+ * @param userUid 
+ */
+export const addFlareRecipientPostFlareCreation = async (flareUid: string, broadcasterUid: string, userUid: string, groupUid: string, groupName: string) : Promise<void> => {
+    const recepientDataPath = `activeBroadcasts/${broadcasterUid}/private/${flareUid}/recepientUids`
+    const exampleFeedObjectPath = `activeBroadcasts/${broadcasterUid}/private/${flareUid}/exampleFeedObject`
+    const exampleFeedObjectSnapshot = await database.ref(exampleFeedObjectPath).once('value');
+
+    if (!exampleFeedObjectSnapshot.exists()) {
+        throw errorReport(`Nonexistent flare!`);
+    }
+
+    const exampleFeedObject: PrivateFlarePublicData = exampleFeedObjectSnapshot.val() as PrivateFlarePublicData
+
+    const updates: Record<string, any> = {}
+    const pathsToDelete : string[] = []
+    const recepientInfo: CompleteRecepientList = {
+        direct: {}, totalDirectRecepients: 0, totalRecepients: 0, totalGroupRecepients: 0,
+        groups: {
+            [groupUid]: {
+                groupName, 
+                members: {
+                    [userUid]: true
+                }
+            }
+        }
+    }
+
+    writeToFeeds(updates, pathsToDelete, flareUid, exampleFeedObject, recepientInfo, false)
+    updates[recepientDataPath + `/groups/${groupUid}/members/${userUid}`] = true
+    await deletionPathCollection.doc(flareUid).update({ paths: admin.firestore.FieldValue.arrayUnion(...pathsToDelete)})
+    await database.ref().update(updates)
 }
 
 
@@ -790,7 +921,7 @@ const makePrivateFlareMetadata = (
         totalConfirmations: 0,
         slug,
         slugPrivate: false,
-        recurringDays: data.recurringDays
+        recurringDays: data.recurringDays?.length > 0 ? data.recurringDays : false
     }
 
     const broadcastAdditionalParams: PrivateFlareAdditionalData = {
@@ -806,6 +937,7 @@ const makePrivateFlareMetadata = (
         recepientUids: allRecepients,
         confirmationCap: data.maxResponders || null,
         responderUids: {},
+        exampleFeedObject: feedObject,
 
         //Be sure to limit this to 30 params, that's the limit for Google Analytics
         ga_analytics: {

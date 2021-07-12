@@ -18,7 +18,7 @@ import {
 } from './utils/utilities';
 import {subscribeToFlareSender, unsubscribeToFlareSender } from './accountManagementFunctions'
 import { deletePicFileOwnedByUid } from './profilePictureFunctions';
-
+import { addFlareRecipientPostFlareCreation, AssociatedFlaresRecord } from "./flares/privateFlares"
 
 export const MAX_GROUP_NAME_LENGTH = 40
 
@@ -338,6 +338,17 @@ const addMembers = async (data: groupEditRequest) => {
   return updates
 }
 
+export const updateNewGroupMemeberFeedWithGroupFlares = 
+functions.database.ref('/userGroupMemberships/{newMemberUid}/{groupUid}')
+    .onCreate(async (snapshot, context) => {
+      const groupName = snapshot.val()
+      const {newMemberUid, groupUid} = context.params
+      const associatedFlaresSnapshotPath = `groupsWithAssociatedFlares/${groupUid}`
+      const associatedFlares = (await database.ref(associatedFlaresSnapshotPath).once("value")).val() as AssociatedFlaresRecord | null
+      if (!associatedFlares) return
+      const flares = Object.keys(associatedFlares)
+      await Promise.all(flares.map(flareUid => addFlareRecipientPostFlareCreation(flareUid, associatedFlares[flareUid] ,newMemberUid, groupUid, groupName)))
+    })
 
 /**
  * Created an object of the form {path: true} to remove the users to a group
