@@ -27,7 +27,8 @@ type NotificationReason =
     "chatMessage" |
     "publicFlareChatMessage" |
     "onboardingReminder" | 
-    "nearbyPublicFlare"
+    "nearbyPublicFlare" |
+    "privateFlareEdited"
 
 export interface MulticastMessagePayload {
     reason: NotificationReason
@@ -275,6 +276,7 @@ const getFCMTokens = async (uid: string, message: CreatedMulticastMessage): Prom
     if (reason === 'chatMessage' && settings.onChat) return tokenArray
     if (reason === 'publicFlareChatMessage' && settings.onChat) return tokenArray
     if (reason === 'nearbyPublicFlare' && settings.onNearbyPublicFlare) return tokenArray
+    if (reason === 'privateFlareEdited') return tokenArray
 
     if (reason === 'newBroadcast'
         && (settings.onBroadcastFrom.includes(causerUid)

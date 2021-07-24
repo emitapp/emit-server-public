@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import { CompleteRecepientList } from '../flares/privateFlares';
+import { CompleteRecipientList } from '../flares/privateFlares';
 import { objectDifference, truncate } from '../utils/utilities';
 import admin = require('firebase-admin');
 import * as fcmCore from './fcmCore'
@@ -38,9 +38,9 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
  */
 export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}/recepientUids')
     .onCreate(async (snapshot, context) => {
-        const recepientList: CompleteRecepientList = snapshot.val()
-        if (!recepientList.direct) recepientList.direct = {}
-        if (!recepientList.groups) recepientList.groups = {}
+        const recipientList: CompleteRecipientList = snapshot.val()
+        if (!recipientList.direct) recipientList.direct = {}
+        if (!recipientList.groups) recipientList.groups = {}
 
         const fcmPromises: Promise<any>[] = []
         const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.broadcastUid}`).once("value")).val()
@@ -55,7 +55,7 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
             message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity}`
             message.data.causerUid = context.params.broadcasterUid
             message.data.associatedFlareId = context.params.broadcastUid
-            await fcmCore.sendFCMMessageToUsers(Object.keys(recepientList.direct), message)
+            await fcmCore.sendFCMMessageToUsers(Object.keys(recipientList.direct), message)
         }
 
         const fcmToGroupRecepients = async (groupName: string, groupUid: string, recepients: string[]) => {
@@ -70,8 +70,8 @@ export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{
         }
 
         fcmPromises.push(fcmToDirectRecepients())
-        for (const groupUid of Object.keys(recepientList.groups || {})) {
-            const group = recepientList.groups[groupUid]
+        for (const groupUid of Object.keys(recipientList.groups || {})) {
+            const group = recipientList.groups[groupUid]
             fcmPromises.push(fcmToGroupRecepients(group.groupName, groupUid, Object.keys(group.members)))
         }
         await Promise.all(fcmPromises)
@@ -133,6 +133,25 @@ export const fcmChatNotification = functions.database.ref('activeBroadcasts/{bro
         if (!allChatRecepients) return;
         const respondersArray: string[] = [...Object.keys(allChatRecepients), context.params.broadcasterUid]
         respondersArray.splice(respondersArray.indexOf(message.data.causerUid), 1)
+        await fcmCore.sendFCMMessageToUsers(respondersArray, message)
+    })
+
+/**
+* Send an FCM message when a chat comes in (for a private flare chat)
+*/
+export const fcmPrivateFlareEdited = functions.database.ref('activeBroadcasts/{broadcasterUid}/private/{eventId}/lastEditId')
+    .onWrite(async (snapshot, context) => {
+        if (!snapshot.after.exists() || !snapshot.before.exists()) return; //Ignore flare creation and deletion
+        const message = fcmCore.generateFCMMessageObject()
+        const flareInfo = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/public/${context.params.eventId}`).once("value")).val()
+        message.data.reason = 'privateFlareEdited'
+        message.notification.title = `Flare Edited: ${flareInfo?.emoji} ${flareInfo?.activity}`
+        message.notification.body = `${flareInfo.owner.displayName} edited their flare.`
+        message.data.associatedFlareId = context.params.eventId
+        message.data.broadcasterUid = context.params.broadcasterUid
+        const allFlareResponders = (await database.ref(`activeBroadcasts/${context.params.broadcasterUid}/private/${context.params.eventId}/responderUids`).once("value")).val()
+        if (!allFlareResponders) return;
+        const respondersArray: string[] = Object.keys(allFlareResponders)
         await fcmCore.sendFCMMessageToUsers(respondersArray, message)
     })
 

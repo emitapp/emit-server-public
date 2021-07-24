@@ -7,6 +7,7 @@ import * as common from './common'
 import { geohashForLocation } from 'geofire-common'
 import { UserSnippet } from '../accountManagementFunctions';
 import { FlareDays } from './common';
+import { v4 as uuidv4, NIL as NIL_UUID  } from 'uuid';
 
 const logger = functions.logger
 
@@ -57,7 +58,7 @@ interface FlareDeletionDoc {
 type userUid = string
 export type AssociatedFlaresRecord = Record<string, userUid>
 
-export interface CompleteRecepientList {
+export interface CompleteRecipientList {
     direct: { [key: string]: boolean; },
     groups: { [key: string]: RecepientGroupInfo },
 
@@ -123,11 +124,12 @@ interface PrivateFlareAdditionalData {
 
 interface PrivateFlarePrivateData {
     cancellationTaskPath: string,
-    recepientUids: CompleteRecepientList,
+    recepientUids: CompleteRecipientList,
     confirmationCap: number | null,
     ga_analytics: Record<string, any>,
     responderUids: Record<string, true | null>,
-    exampleFeedObject: PrivateFlareFeedElement
+    exampleFeedObject: PrivateFlareFeedElement,
+    lastEditId: string
 }
 
 const database = admin.database()
@@ -253,7 +255,7 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
         broadcastPublicData,
         broadcastAdditionalParams,
         broadcastPrivateData
-    } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid)
+    } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid, false)
 
 
     addWriteDelete(updates, pathsToDelete, userBroadcastSection + "/public/" + broadcastUid, broadcastPublicData)
@@ -341,7 +343,7 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
         broadcastPublicData,
         broadcastAdditionalParams,
         broadcastPrivateData
-    } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid)
+    } = makePrivateFlareMetadata(data, feedBroadcastObject, slug, allRecepients, broadcastUid, true)
 
     const responderUidsSnapshot = await database.ref(`activeBroadcasts/${owner.uid}/private/${broadcastUid}/responderUids`).once('value');
     const responderUids = responderUidsSnapshot.val() || {}
@@ -560,7 +562,7 @@ export const lockBroadcastIfNeeded = functions.database.ref('activeBroadcasts/{b
             const responderUidsRef = database.ref(`/activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/responderUids`)
             const responderUids = { ...(await responderUidsRef.once("value")).val() }
             responderUids[newResponderUid] = true //Adding this new responder to the calulcation (since he isn't in the server's record yet)
-            const broadcastRecepients: CompleteRecepientList = (await database
+            const broadcastRecepients: CompleteRecipientList = (await database
                 .ref(`activeBroadcasts/${broadcasterUid}/private/${broadcastUid}/recepientUids`)
                 .once('value'))
                 .val()
@@ -616,7 +618,7 @@ export const getAllActiveBroadcastPaths = async (userUid: string): Promise<activ
     // 4) Paths to all your broadcasts in people's feeds
     const allBroadcastRecepientLists = (await database.ref(`activeBroadcasts/${userUid}/private`).once("value")).val()
     for (const broadcastUid in allBroadcastRecepientLists) {
-        const recepeintList: CompleteRecepientList = allBroadcastRecepientLists[broadcastUid].recepientUids
+        const recepeintList: CompleteRecipientList = allBroadcastRecepientLists[broadcastUid].recepientUids
         for (const directReceientUid in recepeintList.direct) {
             paths.broadcastsFeedPaths.push(`feeds/${directReceientUid}/${broadcastUid}`)
         }
@@ -632,10 +634,10 @@ export const getAllActiveBroadcastPaths = async (userUid: string): Promise<activ
 
 
 const generateRecepientObject =
-    async (data: BroadcastCreationRequest, userUid: string): Promise<CompleteRecepientList> => {
+    async (data: BroadcastCreationRequest, userUid: string): Promise<CompleteRecipientList> => {
 
         let allFriends = {} as { [key: string]: boolean; }
-        const allRecepients: CompleteRecepientList = {
+        const allRecepients: CompleteRecipientList = {
             direct: {},
             groups: {},
             totalRecepients: 0,
@@ -711,7 +713,7 @@ const generateRecepientObject =
     }
 
 
-const isBroadcastRecepient = (broadcastRecepients: CompleteRecepientList, uid: string): boolean => {
+const isBroadcastRecepient = (broadcastRecepients: CompleteRecipientList, uid: string): boolean => {
     //First check the direct recepients
     if (broadcastRecepients.direct && broadcastRecepients.direct[uid]) return true;
 
@@ -775,7 +777,7 @@ const writeToFeeds = (
     pathsToDelete: string[],
     flareUid: string,
     feedObject: PrivateFlareFeedElement,
-    allRecepients: CompleteRecepientList,
+    allRecepients: CompleteRecipientList,
     canOverwriteStatus = true) => {
     //The way we're doing this, broadcasts sent via groups will overwrite
     //broadcasts sent via direct uids or masks (if someone got a broadcast via both)
@@ -838,7 +840,7 @@ const associateFlareWithGroups = (
     pathsToDelete: string[],
     broadcastUid: string,
     broadcasterUid: userUid,
-    recipients: CompleteRecepientList) => {
+    recipients: CompleteRecipientList) => {
     for (const groupUid in recipients.groups) {
         addWriteDelete(writeObject, pathsToDelete, `groupsWithAssociatedFlares/${groupUid}/${broadcastUid}`, broadcasterUid)
     }
@@ -874,7 +876,7 @@ export const addFlareRecipientPostFlareCreation = async (flareUid: string, broad
 
     const updates: Record<string, any> = {}
     const pathsToDelete : string[] = []
-    const recepientInfo: CompleteRecepientList = {
+    const recepientInfo: CompleteRecipientList = {
         direct: {}, totalDirectRecepients: 0, totalRecepients: 0, totalGroupRecepients: 0,
         groups: {
             [groupUid]: {
@@ -897,8 +899,9 @@ const makePrivateFlareMetadata = (
     data: BroadcastCreationRequest,
     feedObject: PrivateFlareFeedElement,
     slug: string,
-    allRecepients: CompleteRecepientList,
-    flareUid: string
+    allRecepients: CompleteRecipientList,
+    flareUid: string,
+    isPreExistingFlare: boolean
 ) => {
 
     //Active broadcasts are split into 4 sections
@@ -938,6 +941,7 @@ const makePrivateFlareMetadata = (
         confirmationCap: data.maxResponders || null,
         responderUids: {},
         exampleFeedObject: feedObject,
+        lastEditId: isPreExistingFlare ? uuidv4() : NIL_UUID,
 
         //Be sure to limit this to 30 params, that's the limit for Google Analytics
         ga_analytics: {
