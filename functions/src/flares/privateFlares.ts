@@ -1,7 +1,7 @@
 //TODO: Purge masks from this file (and the other files that link to it)
 import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
-import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace } from '../utils/utilities';
+import { isEmptyObject, truncate, handleError, successReport, errorReport, isOnlyWhitespace, isFunctionExecutionReport } from '../utils/utilities';
 import { cancelTask, enqueueTask, runTask } from '../utils/cloudTasks'
 import * as common from './common'
 import { geohashForLocation } from 'geofire-common'
@@ -171,7 +171,10 @@ export const createActiveBroadcastCloudTask =
             await createPrivateFlare(req.body)
             res.sendStatus(200)
         } catch (error) {
-            logger.error("createPublicFlareCloudTask error", error)
+            //If this failed and returned a non-fatal report, don't retry since it probably won't
+            //work later on either.
+            if (isFunctionExecutionReport(error)) res.status(200).send(error)
+            logger.error("createActiveBroadcastCloudTask error", error)
             res.status(500).send(error)
         }
 
@@ -270,7 +273,7 @@ const createPrivateFlare = async (data: BroadcastCreationRequest): Promise<strin
     const response = await enqueueTask(common.TASKS_QUEUE, "autoDeleteBroadcast", payload, deathTime)
     updates[userBroadcastSection + "/private/" + broadcastUid].cancellationTaskPath = response.name
 
-    // If flare is recurring, enqueue the createPublicFlareCloudTask
+    // If flare is recurring, enqueue the createActiveBroadcastCloudTask
     if (data.recurringDays?.length > 0) {
 
         if (!data.originalFlareUid) {

@@ -16,13 +16,15 @@ export enum ExecutionStatus {
     LEASE_TAKEN = "lease taken"
 }
 
+type ErroneousStatus = Exclude<ExecutionStatus, ExecutionStatus.OK>;
+
+
 interface ExecutionReport {
     status: ExecutionStatus,
     message?: any,
     fatal?: boolean
 }
 
-type ErroneousStatus = Exclude<ExecutionStatus, ExecutionStatus.OK>;
 
 function createReport(status : ExecutionStatus, message? : any, fatalError?: boolean ) : ExecutionReport {
     const response: ExecutionReport  = {status};
@@ -53,34 +55,37 @@ export function errorReport (
     return createReport(status, message, fatal)
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+export function isFunctionExecutionReport (x : any) : boolean{
+    return (x?.status) && Object.values(ExecutionStatus).includes(x.status)
+}
+
+import {error} from "firebase-functions/lib/logger";
 /**
  * Takes an Error or erroneous ExecutionReport and determines if the error is fatal or native.
  * If it is, it's thrown. If it's not, it's merely returned. This is intended to be called in a catch block
  * @param err The object
  */
-
-
-import {error} from "firebase-functions/lib/logger";
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function handleError(err : any) : any {
-    //Keep in mind that throwing errors also deallocates the server instance
-    if (err.name){ //It's an Error() object
+export function handleError(err : Error | ExecutionReport) : ExecutionReport {
+    //Keep in mind that throwing errors also de-allocates the server instance
+    if ((err as Error).name){ //It's an Error object
         error(err)
         const HttpsFunctionsErrorCodes = [
             'ok', 'cancelled', 'unknown', 'invalid-argument', 
             'deadline-exceeded', 'not-found', 'already-exists', 'permission-denied', 
             'resource-exhausted', 'failed-precondition', 'aborted', 'out-of-range', 'unimplemented', 
             'internal', 'unavailable', 'data-loss', 'unauthenticated'];
-        if (HttpsFunctionsErrorCodes.includes(err.code || "")){ //It's an https error
+        if (HttpsFunctionsErrorCodes.includes((err as HttpsError).code || "")){ //It's an HttpError
             throw err; 
         }else{ //It's another type of error
             throw new HttpsError('unknown', "Something wrong happened! Please try again")
         }
-    }else if (err.fatal){ //It's a fatal execution report
-        const constructedError = new Error(err.message); //Assumes err is an errorReport made via errorReport() so message : string
+    }else if ((err as ExecutionReport).fatal){ //It's a fatal execution report
+        const constructedError = new Error(err.message); //Assumes err is an errorReport made via errorReport() so message is of type string
         throw constructedError;
     }else{ //It's a non-fatal execution report
-        return err
+        return (err as ExecutionReport)
     }
 }
 

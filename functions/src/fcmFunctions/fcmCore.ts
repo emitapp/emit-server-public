@@ -110,6 +110,7 @@ export const disassociateToken = functions.https.onCall(
                     { tokens: admin.firestore.FieldValue.arrayRemove(data) })
             })
             await batchDelete.commit()
+            return successReport()
 
         } catch (err) {
             return handleError(err)

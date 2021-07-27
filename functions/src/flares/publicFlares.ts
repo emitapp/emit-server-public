@@ -5,7 +5,7 @@
 
 import * as functions from 'firebase-functions';
 import { enqueueTask } from '../utils/cloudTasks';
-import { errorReport, handleError, isOnlyWhitespace, successReport, truncate } from '../utils/utilities';
+import { errorReport, handleError, isFunctionExecutionReport, isOnlyWhitespace, successReport, truncate } from '../utils/utilities';
 import * as common from './common';
 import admin = require('firebase-admin');
 import {geohashForLocation} from 'geofire-common'
@@ -77,6 +77,9 @@ export const createPublicFlareCloudTask =
       await createPublicFlareHelper(req.body)
       res.sendStatus(200)
     } catch (error) {
+      //If this failed and returned a non-fatal report, don't retry since it probably won't
+      //work later on either.
+      if (isFunctionExecutionReport(error)) res.status(200).send(error)
       logger.error("createPublicFlareCloudTask error", error)
       res.status(500).send(error)
     }
@@ -87,7 +90,6 @@ export const createPublicFlareCloudTask =
  * handles core logic of creating a public flare
  */
 export const createPublicFlareHelper = async (data: PublicFlareCreationRequest) : Promise<string> => {
-    try {
       if (!data.duration) throw errorReport("Invalid duration");
       if (!data.emoji || !data.activity) throw errorReport(`Invalid activity`);
 
@@ -200,9 +202,6 @@ export const createPublicFlareHelper = async (data: PublicFlareCreationRequest) 
       await Promise.all(promises)
 
       return flareUid
-    } catch (err) {
-      return handleError(err)
-    }
   }
 
 

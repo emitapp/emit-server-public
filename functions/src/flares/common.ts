@@ -4,7 +4,7 @@ import { errorReport, handleError, successReport } from '../utils/utilities';
 import { cancelTask } from '../utils/cloudTasks';
 export const FLARE_LIFETIME_CAP_MINS = 2879 //48 hours - 1 minute
 export const TASKS_QUEUE = functions.config().env.broadcastCreation.autodelete_task_queue_name
-export const MAX_LOCATION_NAME_LENGTH = 100
+export const MAX_LOCATION_NAME_LENGTH = 200
 export const MAX_BROADCAST_NOTE_LENGTH = 500
 const database = admin.database()
 
