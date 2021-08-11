@@ -6,6 +6,7 @@ import {
     generateFCMMessageObject, 
     MulticastMessagePayload
 } from '../../fcmFunctions/fcmCore'
+import { builtInEnvVariables } from '../../utils/env/envVariables';
 
 const logger = functions.logger
 
@@ -23,7 +24,7 @@ interface UidNotificationData {
 
 const checkIfEnabled = () => {
     
-    if (process.env.FUNCTIONS_EMULATOR){
+    if (builtInEnvVariables.runningInEmulator){
         logger.info("__TEST__ function has been called!")
         return;
     } 

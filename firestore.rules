@@ -16,6 +16,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /extraUserInfo/{userUid} {
+      allow read: if request.auth != null
+      allow write: if false;
+    }
+
     match /friendRecommendations/{docName} {
       allow read: if request.auth != null && (request.auth.uid in resource.data.uids || docName.matches(".*"+request.auth.uid+".*"));
       allow write: if false;

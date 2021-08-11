@@ -3,6 +3,7 @@ import * as functions from 'firebase-functions';
 import { errorReport, handleError, successReport } from '../../utils/utilities';
 import * as defaults from  '../../fcmFunctions/defaults'
 import { NotificationSettings } from '../../accountManagementFunctions';
+import { builtInEnvVariables } from '../../utils/env/envVariables';
 
 const logger = functions.logger
 const firestore = admin.firestore();
@@ -10,7 +11,7 @@ const fcmDataRef = firestore.collection("fcmData")
 
 const checkIfEnabled = () => {
     
-    if (process.env.FUNCTIONS_EMULATOR){
+    if (builtInEnvVariables.runningInEmulator){
         logger.info("__TEST__ function has been called!")
         return;
     } 

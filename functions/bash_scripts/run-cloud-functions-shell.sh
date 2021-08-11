@@ -3,6 +3,12 @@
 # Expected pwd: /functions
 cd ..
 sh bash_scripts/update-environment.sh
+
+if [ $? -ne 0 ]; then
+    cd functions
+    exit 1
+fi
+
 cd functions
 
 echo "Running tsc in watch mode 📹"

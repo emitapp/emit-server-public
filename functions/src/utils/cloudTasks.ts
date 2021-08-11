@@ -1,9 +1,10 @@
-import * as functions from 'firebase-functions';
 import { CloudTasksClient } from '@google-cloud/tasks'
+import { builtInEnvVariables, envVariables } from './env/envVariables';
 
-const TASKS_LOCATION = functions.config().env.broadcastCreation.tasks_location
-const FUNCTIONS_LOCATION = functions.config().env.broadcastCreation.functions_location
-const serviceAccountEmail = functions.config().env.broadcastCreation.service_account_email;
+const TASKS_LOCATION = envVariables.broadcastCreation.tasks_location
+const FUNCTIONS_LOCATION = envVariables.broadcastCreation.functions_location
+const serviceAccountEmail = envVariables.broadcastCreation.service_account_email;
+
 
 /**
  * 
@@ -21,7 +22,7 @@ export const enqueueTask = async (
     epochTimeInMillis: number): Promise<any> => {
 
     const tasksClient = new CloudTasksClient()
-    const project = JSON.parse(<string>process.env.FIREBASE_CONFIG).projectId
+    const project = builtInEnvVariables.projectId
     const queuePath: string = tasksClient.queuePath(project, TASKS_LOCATION, queueName)
     const callbackUrl = `https://${FUNCTIONS_LOCATION}-${project}.cloudfunctions.net/${callbackHttpFuncName}`
 

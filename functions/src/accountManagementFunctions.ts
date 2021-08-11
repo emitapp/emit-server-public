@@ -12,6 +12,8 @@ import { queryRecDocsRelatedToUser, queryRecDocsContainingUser } from './friendR
 import * as defaults from './fcmFunctions/defaults'
 import { getLocationDataPaths, LocationDataPaths } from './userLocationFunctions';
 import { deleteAllRecurringFlaresForUser } from './flares/common';
+import { envVariables } from './utils/env/envVariables';
+import { EmailVerificationPaths, ExtraUserInfoPaths, getEmailVerificationPaths, getExtraUserInfoPaths } from './emailVerification';
 
 
 export const MAX_USERNAME_LENGTH = 30
@@ -343,18 +345,22 @@ interface allPathsContainer {
     fcmRelatedPaths: FCMRelatedPaths,
     recDocPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
     recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
-    locationDataPaths: LocationDataPaths
+    locationDataPaths: LocationDataPaths,
+    emailVerificationPaths: EmailVerificationPaths,
+    extraUserInfoPaths: ExtraUserInfoPaths
 }
 
 //Gets all the paths that point to data relating to a user
 export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer> => {
-    const allPaths = {} as any
+    const allPaths = {} as Partial<allPathsContainer>
     const promises = [] as Array<Promise<any>>
     allPaths.savedLocationsPath = `savedLocations/${userUid}`
     allPaths.userSnippetExtrasPath = `userSnippetExtras/${userUid}`
     allPaths.userMetadataPath = `userMetadata/${userUid}`
     allPaths.recDocPaths = queryRecDocsRelatedToUser(userUid)
     allPaths.recDocContainingUserPaths = queryRecDocsContainingUser(userUid)
+    allPaths.emailVerificationPaths = getEmailVerificationPaths(userUid)
+    allPaths.extraUserInfoPaths = getExtraUserInfoPaths(userUid)
 
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
@@ -457,12 +463,12 @@ export const requestAllData = functions.https.onCall(
         //Now sending a the mail to the user
         const nodemailer = await import('nodemailer');
         const transporter = nodemailer.createTransport({
-            host: functions.config().env.userDataEmailing.email_host,
-            port: parseInt(functions.config().env.userDataEmailing.email_port),
-            secure: functions.config().env.userDataEmailing.use_tls === "true", // true for port 465, usually false for other ports
+            host: envVariables.userDataEmailing.email_host,
+            port:envVariables.userDataEmailing.email_port,
+            secure: envVariables.userDataEmailing.use_tls, // true for port 465, usually false for other ports
             auth: {
-                   user: functions.config().env.userDataEmailing.email_address,
-                   pass: functions.config().env.userDataEmailing.email_password
+                   user: envVariables.userDataEmailing.email_address,
+                   pass: envVariables.userDataEmailing.email_password
                }
         });
     
@@ -472,7 +478,7 @@ export const requestAllData = functions.https.onCall(
         mailMessage += '<p>Ciao!</p>\n\n'
         mailMessage += "<p>P.S: Don't reply to this email address - it's never checked. It's only used by our servers to send user data upon request.</p>"
         const mailOptions = {
-            from: functions.config().env.userDataEmailing.email_address, 
+            from: envVariables.userDataEmailing.email_address, 
             to: userEmail, 
             subject: `Your Emit user data (@${username})`, 
             html: mailMessage,
@@ -539,6 +545,14 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
 
     promises.push((async () => {
         await firestore.doc(allPaths.userMetadataPath).delete()
+    })())
+
+    promises.push((async () => {
+        await firestore.doc(allPaths.extraUserInfoPaths.extraInfoPath).delete()
+    })())
+
+    promises.push((async () => {
+        await firestore.doc(allPaths.emailVerificationPaths.emailVerificationPath).delete()
     })())
    
     promises.push(deletePicFileOwnedByUid(user.uid))

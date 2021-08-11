@@ -2,6 +2,7 @@ import { google } from 'googleapis'
 import * as functions from 'firebase-functions';
 import { IncomingWebhook } from "@slack/webhook"
 import { join } from 'path'
+import { envVariables } from '../utils/env/envVariables';
 
 const googleAuth = new google.auth.GoogleAuth({
   keyFile: join(__dirname, '../res/slack-sheets-credentials.json'),
@@ -16,9 +17,9 @@ google.options({
 const logger = functions.logger
 
 export const notifyDevsOfNewUsers = functions.auth.user().onCreate(async (user) => {
-  if (functions.config().env.stats.is_prod_server != "yes") return;
+  if (!envVariables.stats.is_prod_server) return;
   try{
-    const spreadsheetId = functions.config().env.stats.new_users_sheets_id
+    const spreadsheetId = envVariables.stats.new_users_sheets_id
     const row = [new Date(), user.email];
     const sheets = google.sheets({ version: 'v4' });
     await sheets.spreadsheets.values.append({
@@ -32,7 +33,7 @@ export const notifyDevsOfNewUsers = functions.auth.user().onCreate(async (user) 
       }
     });
 
-    const webhook = new IncomingWebhook(functions.config().env.stats.new_user_slack_webhook)
+    const webhook = new IncomingWebhook(envVariables.stats.new_user_slack_webhook)
     await webhook.send({
       icon_emoji: ":calling:",
       text: `${new Date()}: ${user.email}`

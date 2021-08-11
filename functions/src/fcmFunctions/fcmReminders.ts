@@ -2,11 +2,12 @@ import * as functions from 'firebase-functions';
 import admin = require('firebase-admin');
 import * as fcmCore from './fcmCore'
 import { enqueueTask } from '../utils/cloudTasks'
+import { envVariables } from '../utils/env/envVariables';
 
 const database = admin.database();
 const logger = functions.logger
 
-const TASKS_QUEUE = functions.config().env.broadcastCreation.fcm_task_queue_name
+const TASKS_QUEUE = envVariables.broadcastCreation.fcm_task_queue_name
 
 interface OnboardingNotificationPayload {
     recepient: string,
