@@ -34,9 +34,6 @@ interface BroadcastCreationRequest {
     recurringDays: FlareDays[],
     originalFlareUid?: string // only for recurring flares, used as a unique ID, never provided by user
 
-
-    customMaxResponders: boolean,
-
     //Useful for flare editing...
     broadcastUid?: string, //Only when editing the flare...
     friendsToRemove: string[],
@@ -118,7 +115,6 @@ interface PrivateFlareAdditionalData {
     allFriends: boolean,
     friendRecepients: { [key: string]: boolean; },
     groupRecepients: { [key: string]: boolean; },
-    customMaxResponders: boolean,
     maxResponders?: number,
 }
 
@@ -934,7 +930,6 @@ const makePrivateFlareMetadata = (
         allFriends: data.allFriends,
         friendRecepients: data.friendRecepients,
         groupRecepients: data.groupRecepients,
-        customMaxResponders: data.customMaxResponders,
         ...(data.maxResponders ? { maxResponders: data.maxResponders } : {})
     }
 

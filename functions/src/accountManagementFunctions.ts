@@ -365,7 +365,7 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
         allPaths.userSnippetPath = `userSnippets/${userUid}`
-        allPaths.usernamePath = userSnippet ? `usernames/${userSnippet.usernameQuery}` : null
+        allPaths.usernamePath = userSnippet ? `usernames/${userSnippet.usernameQuery}` : undefined
     })())
 
     promises.push(getAllActiveBroadcastPaths(userUid).then(paths => allPaths.activeBroadcastPaths = paths))
