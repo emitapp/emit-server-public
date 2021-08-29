@@ -67,41 +67,41 @@ export const deleteRecurringFlare =
       // Basic checks
       if (!context.auth) throw errorReport("Authentication Needed")
       if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doens\'t match')
-
-      const flareUid = data.flareUid
-      const ownerUid = data.ownerUid
-      const recurringFlarePath = `recurringFlares/${ownerUid}/${flareUid}`
-      const recurringFlareSnapshot = await database.ref(recurringFlarePath).once('value');
-      if (!recurringFlareSnapshot.exists()) throw errorReport(`The flare you're trying to delete doesn't exist.`);
-
-      // kill task
-      const nextTaskName = recurringFlareSnapshot.val().cloudTaskName
-      await cancelTask(nextTaskName)
-
-      // remove entry from db
-      const rtdbDeletions: Record<string, null> = {}
-      rtdbDeletions[recurringFlarePath] = null
-      await database.ref().update(rtdbDeletions)
-      return successReport({ flareUid: flareUid, deleted: true })
+      await deleteRecurringFlareHelper(data)
+      return successReport({ flareUid: data.flareUid, deleted: true })
     } catch (err) {
       return handleError(err)
     }
   });
 
-export const deleteAllRecurringFlaresForUser = async (userUid: string): Promise<any> => {
-  const rtdbDeletions: Record<string, null> = {}
-  const recurringFlarePath = `recurringFlares/${userUid}/`
-  rtdbDeletions[recurringFlarePath] = null
-  const cloudTasksToDelete: string[] = []
-  database.ref(recurringFlarePath).on('value', function (snap) {
-    snap.forEach(function (childSnap) {
-      cloudTasksToDelete.push(childSnap.val().cloudTaskName)
-    })
-  });
 
-  for (const cloudTaskName in cloudTasksToDelete) {
-    await cancelTask(cloudTaskName)
-  }
+export const deleteRecurringFlareHelper = async (data: DeleteRecurringFlareRequest) : Promise<void> => {
+  const flareUid = data.flareUid
+  const ownerUid = data.ownerUid
+  const recurringFlarePath = `recurringFlares/${ownerUid}/${flareUid}`
+  const recurringFlareSnapshot = await database.ref(recurringFlarePath).once('value');
+  if (!recurringFlareSnapshot.exists()) throw errorReport(`The recurring flare you're trying to delete doesn't exist.`);
+
+  // kill task
+  const nextTaskName = recurringFlareSnapshot.val().cloudTaskName
+  await cancelTask(nextTaskName)
+
+  // remove entry from db
+  const rtdbDeletions: Record<string, null> = {}
+  rtdbDeletions[recurringFlarePath] = null
+  await database.ref().update(rtdbDeletions)
+}
+
+
+
+export const deleteAllRecurringFlaresForUser = async (userUid: string): Promise<any> => {
+  const recurringFlarePath = `recurringFlares/${userUid}/`
+  const promises: Promise<void>[] = []
+  const flares = (await database.ref(recurringFlarePath).once("value")).val()
+  if (!flares) return
+  const keys = Object.keys(flares)
+  keys.forEach(flareUid => promises.push(deleteRecurringFlareHelper({flareUid, ownerUid: userUid})))
+  await Promise.all(promises)
 }
 
 /**

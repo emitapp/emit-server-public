@@ -4,11 +4,11 @@
 //icing: which poeple to notify about this public flare
 
 import * as functions from 'firebase-functions';
-import { enqueueTask } from '../utils/cloudTasks';
+import { enqueueTask, runTask, cancelTask } from '../utils/cloudTasks';
 import { errorReport, handleError, isFunctionExecutionReport, isOnlyWhitespace, successReport, truncate } from '../utils/utilities';
 import * as common from './common';
 import admin = require('firebase-admin');
-import {geohashForLocation} from 'geofire-common'
+import { geohashForLocation } from 'geofire-common'
 import { FlareDays } from './common';
 
 
@@ -29,6 +29,11 @@ interface PublicFlareCreationRequest {
   maxResponders?: number,
   recurringDays: FlareDays[],
   originalFlareUid?: string // only for recurring flares, used as a unique ID, never provided by user
+}
+
+interface PublicFlareDeletionRequest {
+  ownerUid: string,
+  flareUid: string
 }
 
 interface PublicFlareDeletionTaskPayload {
@@ -53,12 +58,12 @@ const logger = functions.logger
 /**
  * This creates an active broadcast for a user, and sets it ttl (time to live)
  */
- export const createPublicFlare = functions.https.onCall(
+export const createPublicFlare = functions.https.onCall(
   async (data: PublicFlareCreationRequest, context) => {
     try {
       // Basic checks
       if (!context.auth) throw errorReport("Authentication Needed")
-      if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doens\'t match')
+      if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doesn\'t match')
 
       const flareUid = await createPublicFlareHelper(data)
       return successReport({ flareUid: flareUid })
@@ -85,124 +90,187 @@ export const createPublicFlareCloudTask =
     }
   })
 
+export const editPublicFlare =
+  functions.https.onCall(
+    async (data: PublicFlareCreationRequest, context) => {
+      try {
+        if (!context.auth) throw errorReport("Authentication Needed")
+        if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doesn\'t match')
+
+        const flareUid = await createPublicFlareHelper(data, true)
+        return successReport({ flareUid: flareUid })
+      } catch (err) {
+        return handleError(err)
+      }
+    });
+
+export const deletePublicFlare =
+  functions.https.onCall(
+    async (data: PublicFlareDeletionRequest, context) => {
+      try {
+        if (!context.auth) throw errorReport("Authentication Needed")
+        if (context.auth.uid !== data.ownerUid) throw errorReport('Your auth token doesn\'t match')
+        const flarePrivateDoc = await publicFlaresCol.doc(data.flareUid).collection("private").doc("private").get()
+        const privateData = flarePrivateDoc.data()
+        if (!privateData) throw errorReport("Failed to fetch flare private data")
+
+        await runTask(privateData.cancellationTaskPath)
+
+        return successReport({ flareUid: data.flareUid })
+      } catch (err) {
+        return handleError(err)
+      }
+    });
+
+
 /**
  * Helper function for createPublicFlareCloudTask and createPublicFlare
  * handles core logic of creating a public flare
+ * If the flare is being edited, it is assumed that the originalFlareUid is added
  */
-export const createPublicFlareHelper = async (data: PublicFlareCreationRequest) : Promise<string> => {
-      if (!data.duration) throw errorReport("Invalid duration");
-      if (!data.emoji || !data.activity) throw errorReport(`Invalid activity`);
+export const createPublicFlareHelper = async (data: PublicFlareCreationRequest, isEditing?: boolean): Promise<string> => {
 
-      let deathTime = 0; //In milliseconds
-      if (data.startingTimeRelative) deathTime += Date.now() + data.startingTime;
-      //If the flare was set to start "in the past" for any reason starts now
-      else if (data.startingTime < Date.now()) deathTime = Date.now();
-      else deathTime = data.startingTime;
+  let existingFlareObject = undefined
+  let oldCancellationTaskPath = undefined
 
-      const absoluteStartingTime = deathTime
-      deathTime += data.duration;
+  if (isEditing && !data.originalFlareUid) throw errorReport("Editing flare but no flare ID provided")
 
-      if (isNaN(deathTime) || deathTime > (Date.now() + common.FLARE_LIFETIME_CAP_MINS * 60000)) {
-        throw errorReport(`Your flare can't last for more than 48 hours`);
-      }
+  if (isEditing) {
+    const existingFlareDoc = await publicFlaresCol.doc(data.originalFlareUid as string).get()
+    if (!existingFlareDoc.data()) throw errorReport("There is no flare to edit")
+    existingFlareObject = existingFlareDoc.data()
+    if (existingFlareObject?.owner?.uid != data.ownerUid) throw errorReport("You don't own this flare.")
 
-      if (data.maxResponders && !Number.isInteger(data.maxResponders)) {
-        throw errorReport("Invalid responder cap");
-      }
-
-      if (data.note && data.note.length > common.MAX_BROADCAST_NOTE_LENGTH) {
-        throw errorReport(`Broadcast note too long`);
-      }
-
-      if (data.location && data.location.length > common.MAX_LOCATION_NAME_LENGTH) {
-        throw errorReport(`Broadcast location name too long`);
-      }
-
-      //Making the full and the shortened flare docs
-      const flareUid = <string>(await database.ref().push()).key //TODO: Find a firestore way to do this.
-      const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
-      if (!ownerSnippetSnapshot.exists()) {
-        throw errorReport(`Owner snapshot missing - your account isn't set up yet`);
-      }
-
-      //Making the object that will actually be in people's feeds
-      const shortenedFlareObject: any = {
-        owner: { uid: data.ownerUid, ...ownerSnippetSnapshot.val() },
-        deathTimestamp: deathTime,
-        duration: data.duration,
-        startingTime: absoluteStartingTime,
-        activity: data.activity,
-        emoji: data.emoji,
-        ...(data.location ? { location: data.location } : {}),
-        ...(data.note ? { note: truncate(data.note, 50) } : {}),
-        ...(data.tags ? { tags: data.tags } : {}),
-        recurringDays: data.recurringDays
-      }
-
-      if (data.geolocation) {
-        shortenedFlareObject.geolocation = data.geolocation
-        shortenedFlareObject.geoHash = geohashForLocation([data.geolocation.latitude, data.geolocation.longitude])
-    }
-
-
-      const promises: Array<Promise<any>> = []
-      const rtdbAdditions: Record<string, any> = {}
-
-      //Making the flare's URL slug...
-      const flareSlug = await common.getAvailableFlareSlug(6)
-      rtdbAdditions[`flareSlugs/${flareSlug}`] = { flareUid: flareUid, ownerUid: data.ownerUid, private: false, firestore: true }
-
-
-      //Identical to the feed object but it has the full note and a responder counter and a list of responders
-      const fullFlareObject = {
-        ...shortenedFlareObject,
-        ...(data.note ? { note: data.note } : {}),
-        totalConfirmations: 0,
-        responders: [], //FIXME: is this a good idea? not sure
-        slug: flareSlug,
-        slugPrivate: false,
-      }
-
-      //Enqueueing the deletion task
-      const payload: PublicFlareDeletionTaskPayload = { flareUid, flareSlug }
-      const response = await enqueueTask(common.TASKS_QUEUE, "autoPublicFlareDeletion", payload, deathTime)
-
-
-      const privateFlareInformaion = {
-        cancellationTaskPath: response.name,
-        confirmationCap: data.maxResponders || null
-      }
-
-      // If flare is recurring, enqueue the createPublicFlareCloudTask
-      if (data.recurringDays?.length > 0) {
-
-        if (!data.originalFlareUid) {
-          data.originalFlareUid = flareUid
-        }
-
-        // enqueue next task
-        const nextExecutionTime = common.computeNextExecutionTime(data.recurringDays, absoluteStartingTime)
-        const cloudTaskResponse = await enqueueTask(common.TASKS_QUEUE, "createPublicFlareCloudTask", data, nextExecutionTime)
-
-        // maintain unique identifier for recurring flares as the original flare id, as the flare
-        // id changes each time this function is called
-        rtdbAdditions[`recurringFlares/${data.ownerUid}/${data.originalFlareUid}`] = {
-          ...shortenedFlareObject,
-          originalFlareUid: data.originalFlareUid,
-          frequency: data.recurringDays.join("/"),
-          cloudTaskName: cloudTaskResponse.name
-        }
-      }
-
-      //Doing the writes...
-      promises.push(publicFlaresCol.doc(flareUid).set(fullFlareObject))
-      promises.push(shortPubFlareCol.doc(flareUid).set(shortenedFlareObject))
-      promises.push(publicFlaresCol.doc(flareUid).collection("private").doc("private").set(privateFlareInformaion))
-      promises.push(database.ref().update(rtdbAdditions));
-      await Promise.all(promises)
-
-      return flareUid
+    const flarePrivateDoc = await publicFlaresCol.doc(data.originalFlareUid as string).collection("private").doc("private").get()
+    if (!flarePrivateDoc.data()) throw errorReport("Could not get privare flare information of to-be-edited flare")
+    oldCancellationTaskPath = flarePrivateDoc.data()?.cancellationTaskPath
   }
+
+  if (!data.duration) throw errorReport("Invalid duration");
+  if (!data.emoji || !data.activity) throw errorReport(`Invalid activity`);
+
+  let deathTime = 0; //In milliseconds
+  if (data.startingTimeRelative) deathTime += Date.now() + data.startingTime;
+  //If the flare was set to start "in the past" for any reason starts now
+  else if (data.startingTime < Date.now()) deathTime = Date.now();
+  else deathTime = data.startingTime;
+
+  const absoluteStartingTime = deathTime
+  deathTime += data.duration;
+
+  if (isNaN(deathTime) || deathTime > (Date.now() + common.FLARE_LIFETIME_CAP_MINS * 60000)) {
+    throw errorReport(`Your flare can't last for more than 48 hours`);
+  }
+
+  if (data.maxResponders && !Number.isInteger(data.maxResponders)) {
+    throw errorReport("Invalid responder cap");
+  }
+
+  if (data.note && data.note.length > common.MAX_BROADCAST_NOTE_LENGTH) {
+    throw errorReport(`Broadcast note too long`);
+  }
+
+  if (data.location && data.location.length > common.MAX_LOCATION_NAME_LENGTH) {
+    throw errorReport(`Broadcast location name too long`);
+  }
+
+  //Making the full and the shortened flare docs
+  // If flareUid already exists, we're probably in edit mode right now
+  //TODO: Find a firestore way to do this (the next PR is planned to do this, iirc)
+  const flareUid = isEditing ? data.originalFlareUid : <string>(await database.ref().push()).key 
+
+  if (!flareUid) throw errorReport(`Invalid FlareUid`)
+
+  const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
+  if (!ownerSnippetSnapshot.exists()) {
+    throw errorReport(`Owner snapshot missing - your account isn't set up yet`);
+  }
+
+  //Making the object that will actually be in people's feeds
+  const shortenedFlareObject: any = {
+    owner: { uid: data.ownerUid, ...ownerSnippetSnapshot.val() },
+    deathTimestamp: deathTime,
+    duration: data.duration,
+    startingTime: absoluteStartingTime,
+    activity: data.activity,
+    emoji: data.emoji,
+    ...(data.location ? { location: data.location } : {}),
+    ...(data.note ? { note: truncate(data.note, 50) } : {}),
+    ...(data.tags ? { tags: data.tags } : {}),
+    recurringDays: data.recurringDays
+  }
+
+  if (data.geolocation) {
+    shortenedFlareObject.geolocation = data.geolocation
+    shortenedFlareObject.geoHash = geohashForLocation([data.geolocation.latitude, data.geolocation.longitude])
+  }
+
+
+  const promises: Array<Promise<any>> = []
+  const rtdbAdditions: Record<string, any> = {}
+
+  let flareSlug = null
+  //Making the flare's URL slug...
+  if (existingFlareObject) {
+    flareSlug = existingFlareObject.slug
+  } else {
+    flareSlug = await common.getAvailableFlareSlug(6)
+    rtdbAdditions[`flareSlugs/${flareSlug}`] = { flareUid: flareUid, ownerUid: data.ownerUid, private: false, firestore: true }
+  }
+
+  //Identical to the feed object but it has the full note and a responder counter and a list of responders
+  const fullFlareObject = {
+    ...shortenedFlareObject,
+    ...(data.note ? { note: data.note } : {}),
+    ...(data.maxResponders ? { maxResponders: data.maxResponders } : {}),
+    startingTimeRelative: data.startingTimeRelative,
+    totalConfirmations: 0,
+    responders: [], //FIXME: is this a good idea? not sure
+    slug: flareSlug,
+    slugPrivate: false,
+
+  }
+
+  //Enqueueing the deletion task
+  const payload: PublicFlareDeletionTaskPayload = { flareUid, flareSlug }
+  const response = await enqueueTask(common.TASKS_QUEUE, "autoPublicFlareDeletion", payload, deathTime)
+
+  const privateFlareInformation = {
+    cancellationTaskPath: response.name,
+    confirmationCap: data.maxResponders || null
+  }
+
+  // If flare is recurring, enqueue the createPublicFlareCloudTask
+  // This should only be done if the flare is being created for the first time.
+  if (data.recurringDays?.length > 0 && !isEditing) {
+
+    // enqueue next task
+    const nextExecutionTime = common.computeNextExecutionTime(data.recurringDays, absoluteStartingTime)
+    const cloudTaskResponse = await enqueueTask(common.TASKS_QUEUE, "createPublicFlareCloudTask", data, nextExecutionTime)
+    const executionCloudTaskName = cloudTaskResponse.name
+    // maintain unique identifier for recurring flares as the original flare id, as the flare
+    // id changes each time this function is called
+    rtdbAdditions[`recurringFlares/${data.ownerUid}/${flareUid}`] = {
+      ...shortenedFlareObject,
+      originalFlareUid: flareUid,
+      frequency: data.recurringDays.join("/"),
+      cloudTaskName: executionCloudTaskName
+    }
+  }
+
+  //Doing the writes...
+  promises.push(publicFlaresCol.doc(flareUid).set(fullFlareObject))
+  promises.push(shortPubFlareCol.doc(flareUid).set(shortenedFlareObject))
+  promises.push(publicFlaresCol.doc(flareUid).collection("private").doc("private").set(privateFlareInformation))
+  promises.push(database.ref().update(rtdbAdditions));
+  await Promise.all(promises)
+
+  if (isEditing) {
+    await cancelTask(oldCancellationTaskPath)
+  }
+
+  return flareUid
+}
 
 
 
@@ -278,15 +346,15 @@ export const respondToPublicFlare = functions.https.onCall(
       promises.push(database.ref().update(rtdbAdditions));
 
       if (isJoining) {
-        const snippet = {...responderSnippet, flareOwner: flareInfo.data()?.owner.uid} //flareOwner useful for fcmBroadcastResponsePublicFlare cloud function
+        const snippet = { ...responderSnippet, flareOwner: flareInfo.data()?.owner.uid } //flareOwner useful for fcmBroadcastResponsePublicFlare cloud function
         promises.push(publicFlaresCol.doc(flareUid).collection("responders").doc(uid).set(snippet))
-        promises.push(publicFlaresCol.doc(flareUid).update({ 
+        promises.push(publicFlaresCol.doc(flareUid).update({
           totalConfirmations: admin.firestore.FieldValue.increment(1),
-          responders: admin.firestore.FieldValue.arrayUnion(uid) 
+          responders: admin.firestore.FieldValue.arrayUnion(uid)
         }))
       } else {
         promises.push(publicFlaresCol.doc(flareUid).collection("responders").doc(uid).delete())
-        promises.push(publicFlaresCol.doc(flareUid).update({ 
+        promises.push(publicFlaresCol.doc(flareUid).update({
           totalConfirmations: admin.firestore.FieldValue.increment(-1),
           responders: admin.firestore.FieldValue.arrayRemove(uid)
         }))
