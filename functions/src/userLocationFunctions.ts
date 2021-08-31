@@ -4,9 +4,7 @@ import { geohashQueryBounds, distanceBetween } from 'geofire-common';
 import { DEFAULT_DOMAIN_HASH } from './flares/publicFlares';
 import { publicFlareUserMetadataPrivateInterface } from './flares/publicFlareUserMetadata';
 
-const database = admin.database()
 const firestore = admin.firestore()
-
 interface Coordinates {
   latitude: number
   longitude: number
@@ -16,9 +14,16 @@ export const removeUserLocationHashesOnPreferenceChange = functions.database.ref
   .onWrite(async (snapshot, context) => {
     const newValue = snapshot.after.val()
     if (!newValue) {
-      await database.ref(`userLocationGeoHashes/${context.params.userUid}`).remove()
+      const doc = await firestore.doc(`publicFlareUserMetadataPrivate/${context.params.userUid}`).get()
+      if (doc.exists) {
+        await doc.ref.update({
+          geoHash: admin.firestore.FieldValue.delete(),
+          geolocation: admin.firestore.FieldValue.delete()
+        })
+      }
     }
-  });
+});
+
 
 export const PUBLIC_FLARE_RADIUS_IN_M = 9656 //6 miles
 
