@@ -16,7 +16,7 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /extraUserInfo/{userUid} {
+    match /publicExtraUserInfo/{userUid} {
       allow read: if request.auth != null
       allow write: if false;
     }
@@ -26,12 +26,36 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /shortenedPublicFlares/{flareID} {
+    match /userEmailVerifications/{userUid}{
+      allow read, write: if false
+    }
+
+
+    match /publicFlareUserMetadataPrivate/{userUid}{
+      allow read: if false
+      allow create, update: if request.auth != null &&
+       request.auth.uid == userUid &&
+       request.resource.data.keys().hasOnly(['geoHash', 'geolocation']) &&
+       request.resource.data.geoHash is string && 
+       request.resource.data.geolocation is map &&
+       request.resource.data.geolocation.keys().hasOnly(["latitude", "longitude"]) &&
+       request.resource.data.geolocation.latitude is float &&
+       math.abs(request.resource.data.geolocation.latitude) <= 90 &&
+       request.resource.data.geolocation.longitude is float && 
+       math.abs(request.resource.data.geolocation.longitude) <= 180
+    }
+
+    match /shortenedPublicFlares/{orgoHash}/public_flares_short/{flareID} {
       allow read: if request.auth != null;
       allow write: if false;
     }
 
-    match /publicFlares/{flareUid} {
+    //For collection group queries in the app feed
+    match /{path=**}/public_flares/{flareID} {
+      allow read: if request.auth.uid == resource.data.owner.uid;
+    }
+
+    match /publicFlares/{orgoHash}/public_flares/{flareUid} {
       allow read: if request.auth != null;
       allow write: if false;
 

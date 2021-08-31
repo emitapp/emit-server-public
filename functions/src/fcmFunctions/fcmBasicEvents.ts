@@ -3,7 +3,7 @@ import { CompleteRecipientList } from '../flares/privateFlares';
 import { objectDifference, truncate } from '../utils/utilities';
 import admin = require('firebase-admin');
 import * as fcmCore from './fcmCore'
-import { publicFlaresCol } from '../flares/publicFlares'
+import { DEFAULT_DOMAIN_HASH, getPublicFlareCol, ShortenedPublicFlareInformation } from '../flares/publicFlares'
 import { getUsersNearLocation, PUBLIC_FLARE_RADIUS_IN_M } from '../userLocationFunctions';
 
 const database = admin.database();
@@ -33,7 +33,7 @@ export const fcmNewFriend = functions.database.ref('/userFriendGroupings/{receiv
         await fcmCore.sendFCMMessageToUsers([context.params.receiverUid], message)
     })
 
-/**
+/** 
  * Sends an FCM message to users when they get a new active broadcast in their feed
  */
 export const fcmNewActiveBroadcast = functions.database.ref('/activeBroadcasts/{broadcasterUid}/private/{broadcastUid}/recepientUids')
@@ -157,10 +157,11 @@ export const fcmPrivateFlareEdited = functions.database.ref('activeBroadcasts/{b
 
 
 
-export const fcmNearbyPublicFlareNotification = functions.firestore.document('shortenedPublicFlares/{flareUid}')
+export const fcmNearbyPublicFlareNotification = functions.firestore.document('shortenedPublicFlares/{orgoHash}/public_flares_short/{flareUid}')
     .onCreate(async (snap, context) => {
         const message = fcmCore.generateFCMMessageObject()
-        const flareInfo = snap.data()
+        const flareInfo = snap.data() as ShortenedPublicFlareInformation
+        const orgoHash = context.params.orgoHash
         message.data.reason = "nearbyPublicFlare"
         message.notification.title = `Someone made a flare near you!`
         message.notification.body = `${flareInfo?.emoji} ${flareInfo?.activity} \n Made by ${flareInfo?.owner?.displayName}`
@@ -168,7 +169,9 @@ export const fcmNearbyPublicFlareNotification = functions.firestore.document('sh
         message.data.associatedFlareId = context.params.flareUid
         message.data.broadcasterUid = flareInfo?.owner?.uid
 
-        const nearbyUserUids = await getUsersNearLocation(flareInfo.geolocation, PUBLIC_FLARE_RADIUS_IN_M)
+        if (orgoHash != DEFAULT_DOMAIN_HASH) message.notification.body += ` (${flareInfo.domain})`
+
+        const nearbyUserUids = await getUsersNearLocation(flareInfo.geolocation, PUBLIC_FLARE_RADIUS_IN_M, orgoHash)
         const index = nearbyUserUids.indexOf(flareInfo?.owner?.uid);
         if (index > -1) nearbyUserUids.splice(index, 1);
         await fcmCore.sendFCMMessageToUsers(nearbyUserUids, message)
@@ -178,7 +181,7 @@ export const fcmNearbyPublicFlareNotification = functions.firestore.document('sh
 /**
  * Send an FCM message to a user when someone responds to one of their public flares
  */
-export const fcmBroadcastResponsePublicFlare = functions.firestore.document("publicFlares/{flareUid}/responders/{responderUid}")
+export const fcmBroadcastResponsePublicFlare = functions.firestore.document("publicFlares/{orgoHash}/public_flares/{flareUid}/responders/{responderUid}")
     .onCreate(async (doc, context) => {
         const message = fcmCore.generateFCMMessageObject()
         message.data.reason = 'publicFlareResponse'
@@ -192,13 +195,13 @@ export const fcmBroadcastResponsePublicFlare = functions.firestore.document("pub
 /**
 * Send an FCM message when a chat comes in (for a public flare chat)
 */
-export const fcmChatNotificationPublicFlare = functions.database.ref('publicFlareChats/{flareUid}/{messageID}')
+export const fcmChatNotificationPublicFlare = functions.database.ref('publicFlareChats/{orgoHash}/{flareUid}/{messageID}')
     .onCreate(async (snapshot, context) => {
         //Quick assignments
         if (snapshot.val().system) return; //Don't send notifications for system type messages
         const message = fcmCore.generateFCMMessageObject()
-        const { flareUid } = context.params
-        const flareInfo = (await publicFlaresCol.doc(flareUid).get()).data()
+        const { flareUid, orgoHash } = context.params
+        const flareInfo = (await getPublicFlareCol(orgoHash).doc(flareUid).get()).data()
 
         //Composing message
         message.data.reason = 'publicFlareChatMessage'

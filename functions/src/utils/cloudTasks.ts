@@ -54,7 +54,8 @@ export const enqueueTask = async (
 /**
  * Deletes a Cloud task that's been previously queued
  * @param name the cancellationTaskPath
- */export const cancelTask = async (name: string): Promise<any> => {
+ */
+export const cancelTask = async (name: string): Promise<any> => {
     const tasksClient = new CloudTasksClient()
     await tasksClient.deleteTask({ name });
 }

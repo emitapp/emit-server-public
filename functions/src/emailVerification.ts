@@ -7,6 +7,7 @@ import { sendEmailFromCustomDomain } from './utils/emails';
 import { errorReport, handleError, successReport } from './utils/utilities';
 import admin = require('firebase-admin');
 import { builtInEnvVariables, envVariables } from './utils/env/envVariables';
+import { getDomainFromEmail, hashOrgoNameForFirestore } from './utils/strings';
 
 const firestore = admin.firestore()
 const database = admin.database()
@@ -25,12 +26,13 @@ interface userVerificationInfo {
     timestamp: number
 }
 
-interface extraUserInfoEmailOnly {
-    lastVerifiedEmailDomain: string
+export interface extraUserInfoEmailOnly {
+    lastVerifiedEmailDomain: string,
+    hashedDomain: string, 
 }
 
 const verificationCollection = firestore.collection('userEmailVerifications')
-const extraUserInfoCollection = firestore.collection('extraUserInfo')
+export const extraUserInfoCollection = firestore.collection('publicExtraUserInfo')
 
 
 export const sendVerificationEmail = functions.https.onCall(async (_, context) => {
@@ -115,7 +117,10 @@ export const verifyEmail = functions.https.onRequest(async (req, res) => {
         const domain = getDomainFromEmail(docData.emailAssociatedWithLink)
         if (!domain) return res.sendStatus(403).end("Could not get domain from email.");
         admin.auth().updateUser(verificationDoc.id, { emailVerified: true })
-        const valueToSet: extraUserInfoEmailOnly = { lastVerifiedEmailDomain: domain }
+        const valueToSet: extraUserInfoEmailOnly = { 
+            lastVerifiedEmailDomain: domain,
+            hashedDomain: hashOrgoNameForFirestore(domain)
+        }
         await extraUserInfoCollection.doc(verificationDoc.id).set(valueToSet, { merge: true });
         await verificationDoc.ref.delete()
         res.status(200).send("Email verified! Restart the app and it'll be applied :)")
@@ -133,10 +138,6 @@ const codifyLinkSearchParams = (params: URLSearchParams) => {
     return mode + oobCode + apiKey
 }
 
-const getDomainFromEmail = (email: string) => {
-    return email.split("@").pop()
-}
-
 //For now tis will be here, but it should eventually be moved to a place that manages
 //"extrauserinfo" in general
 export interface ExtraUserInfoPaths {
@@ -145,7 +146,7 @@ export interface ExtraUserInfoPaths {
 
 export const getExtraUserInfoPaths = (userUid: string): ExtraUserInfoPaths => {
     return {
-        extraInfoPath: `extraUserInfo/${userUid}`
+        extraInfoPath: `publicExtraUserInfo/${userUid}`
     }
 }
 export interface EmailVerificationPaths {

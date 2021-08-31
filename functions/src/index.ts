@@ -16,22 +16,22 @@ admin.initializeApp({
 ingestEnvVariables()
 
 export * from './accountManagementFunctions';
-export * from './profilePictureFunctions';
 export * from './devFunctions/dbMgmtFunctions/notificationManagement';
+export * from './devFunctions/testFunctions/emailAndDomains';
 export * from './devFunctions/testFunctions/notificationTests';
+export * from './emailLists';
+export * from './emailVerification';
 export * from './fcmFunctions/fcmBasicEvents';
+export * from './fcmFunctions/fcmCore';
 export * from './fcmFunctions/fcmReminders';
+export * from './flares/common';
+export * from './flares/privateFlares';
+export * from './flares/publicFlares';
+export * from './flares/publicFlareUserMetadata';
 export * from './friendMaskFunctions';
 export * from './friendRecommendations';
 export * from './friendRequestFunctions';
-export * from './flares/privateFlares';
-export * from './flares/publicFlares';
+export * from './profilePictureFunctions';
 export * from './statsFunctions/onNewUser';
-export * from './flares/common';
 export * from './userGroupFunctions';
 export * from './userInviting';
-export * from './fcmFunctions/fcmCore';
-export * from './emailLists';
-export * from './emailVerification';
-
-

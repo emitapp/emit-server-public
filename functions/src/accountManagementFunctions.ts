@@ -14,6 +14,7 @@ import { getLocationDataPaths, LocationDataPaths } from './userLocationFunctions
 import { deleteAllRecurringFlaresForUser } from './flares/common';
 import { envVariables } from './utils/env/envVariables';
 import { EmailVerificationPaths, ExtraUserInfoPaths, getEmailVerificationPaths, getExtraUserInfoPaths } from './emailVerification';
+import { getPrivatePublicFlareMetadataPath, PublicFlareUserMetadataPrivatePath } from './flares/publicFlareUserMetadata';
 
 
 export const MAX_USERNAME_LENGTH = 30
@@ -347,7 +348,8 @@ interface allPathsContainer {
     recDocContainingUserPaths: FirebaseFirestore.Query<FirebaseFirestore.DocumentData>,
     locationDataPaths: LocationDataPaths,
     emailVerificationPaths: EmailVerificationPaths,
-    extraUserInfoPaths: ExtraUserInfoPaths
+    extraUserInfoPaths: ExtraUserInfoPaths,
+    publicFlareMetadata: PublicFlareUserMetadataPrivatePath
 }
 
 //Gets all the paths that point to data relating to a user
@@ -361,6 +363,7 @@ export const getAllPaths  = async (userUid : string) : Promise<allPathsContainer
     allPaths.recDocContainingUserPaths = queryRecDocsContainingUser(userUid)
     allPaths.emailVerificationPaths = getEmailVerificationPaths(userUid)
     allPaths.extraUserInfoPaths = getExtraUserInfoPaths(userUid)
+    allPaths.publicFlareMetadata = getPrivatePublicFlareMetadataPath(userUid)
 
     promises.push((async () => {
         const userSnippet = (await database.ref(`userSnippets/${userUid}`).once('value')).val()
@@ -535,26 +538,16 @@ export const deleteUserData = functions.auth.user().onDelete(async (user) => {
     pushPath(allPaths.userSnippetPath)
     pushPath(allPaths.recurringFlaresPath)
 
-    pushPath(allPaths.locationDataPaths.locationDataPath)
     pushPath(allPaths.locationDataPaths.locationGatheringPreferencePath)
 
 
-    promises.push((async () => {
-        await firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete()
-    })())
+    promises.push(firestore.doc(allPaths.fcmRelatedPaths.tokenDocumentPath).delete())
+    promises.push(firestore.doc(allPaths.userMetadataPath).delete())
+    promises.push(firestore.doc(allPaths.extraUserInfoPaths.extraInfoPath).delete())
+    promises.push(firestore.doc(allPaths.emailVerificationPaths.emailVerificationPath).delete())
+    promises.push(firestore.doc(allPaths.emailVerificationPaths.emailVerificationPath).delete())
+    promises.push(firestore.doc(allPaths.publicFlareMetadata.metadatapath).delete())
 
-    promises.push((async () => {
-        await firestore.doc(allPaths.userMetadataPath).delete()
-    })())
-
-    promises.push((async () => {
-        await firestore.doc(allPaths.extraUserInfoPaths.extraInfoPath).delete()
-    })())
-
-    promises.push((async () => {
-        await firestore.doc(allPaths.emailVerificationPaths.emailVerificationPath).delete()
-    })())
-   
     promises.push(deletePicFileOwnedByUid(user.uid))
     pushPath(allPaths.profilePicRelatedPaths.avatarSeed)
     

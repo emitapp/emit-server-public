@@ -4,6 +4,9 @@
  * as well as the functions for creating and sending FCM messages
  */
 
+//TODO: Currently this is done in Firestore, but it can actually also be RTDB based
+//should we change it to RTDB for better cost?
+
 import * as functions from 'firebase-functions';
 import { NotificationSettings } from '../accountManagementFunctions';
 import { errorReport, handleError, successReport } from '../utils/utilities';
