@@ -24,9 +24,6 @@ const checkIfEnabled = () => {
 }
 
 
-/**
- * Sends a notificaion to a groups of users using their uids
- */
 export const test_associateUserWithDomain = functions.https.onCall(
     async (params: EmailAssociationRequest, _) => {
         try {
@@ -44,6 +41,22 @@ export const test_associateUserWithDomain = functions.https.onCall(
                 hashedDomain: hashOrgoNameForFirestore(domain)
             }
             await extraUserInfoCollection.doc(uidFromUsername).set(valueToSet, { merge: true });
+            return successReport()
+        } catch (err) {
+            return handleError(err)
+        }
+    });
+
+
+
+ export const test_unverifyUserEmail = functions.https.onCall(
+    async (username: string, _) => {
+        try {
+            if (!username) throw errorReport("Need username.");
+            const uidFromUsername = (await admin.database().ref(`/usernames/${username}`).once("value")).val()
+            if (!uidFromUsername) throw errorReport("Could not get id.");
+
+            admin.auth().updateUser(uidFromUsername, { emailVerified: false })
             return successReport()
         } catch (err) {
             return handleError(err)

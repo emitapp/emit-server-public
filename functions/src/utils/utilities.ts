@@ -154,3 +154,17 @@ export function randomKey (obj: Record<string, unknown>) : string{
     const keys = Object.keys(obj);
     return keys[ keys.length * Math.random() << 0 ];
 }
+
+/**
+* Creates an array of elements split into groups the length of size.
+* @param array The array to split up
+* @param size The max suze per chunk
+*/
+//chunkArray(['a', 'b', 'c', 'd'], 3) => [['a', 'b', 'c'], ['d']]
+export const chunkArray = (array: any[], size: number): any[] => {
+   return array.reduce((arr, item, idx) => {
+       return idx % size === 0
+           ? [...arr, [item]]
+           : [...arr.slice(0, -1), [...arr.slice(-1)[0], item]];
+   }, []);
+}

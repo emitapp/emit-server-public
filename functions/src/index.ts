@@ -16,9 +16,6 @@ admin.initializeApp({
 ingestEnvVariables()
 
 export * from './accountManagementFunctions';
-export * from './devFunctions/dbMgmtFunctions/notificationManagement';
-export * from './devFunctions/testFunctions/emailAndDomains';
-export * from './devFunctions/testFunctions/notificationTests';
 export * from './emailLists';
 export * from './emailVerification';
 export * from './fcmFunctions/fcmBasicEvents';
@@ -35,3 +32,8 @@ export * from './profilePictureFunctions';
 export * from './statsFunctions/onNewUser';
 export * from './userGroupFunctions';
 export * from './userInviting';
+
+//*These should only be un-commented for use in dev and shell environments
+// export * from './devFunctions/dbMgmtFunctions/notificationManagement';
+// export * from './devFunctions/testFunctions/emailAndDomains';
+// export * from './devFunctions/testFunctions/notificationTests';

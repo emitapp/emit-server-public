@@ -78,7 +78,7 @@ const _sendVerificationEmail = async (user: UserRecord) => {
     //Sending the email
     const subject = "Let's get your email verified!"
     let mailMessage = `<p><strong>Heya ${snippet.displayName}!&nbsp;👋👋🏾</strong></p>\n`
-    mailMessage += '<p>Looks like you\'re trying to verifly your Emit email address!</p>\n'
+    mailMessage += '<p>Looks like you\'re trying to verify your Emit email address!</p>\n'
     mailMessage += "<p>Simply click this link below and you should be good to go!</p>\n\n"
     mailMessage += `<a href="${newURLFull}">${newURLFull}</a>`
     mailMessage += '<p>\n\nCiao!</p>\n\n'
