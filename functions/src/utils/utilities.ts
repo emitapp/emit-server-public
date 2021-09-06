@@ -79,7 +79,7 @@ export function handleError(err : Error | ExecutionReport) : ExecutionReport {
         if (HttpsFunctionsErrorCodes.includes((err as HttpsError).code || "")){ //It's an HttpError
             throw err; 
         }else{ //It's another type of error
-            throw new HttpsError('unknown', "Something wrong happened! Please try again")
+            throw new HttpsError('unknown', "Something wrong happened! Please try again.")
         }
     }else if ((err as ExecutionReport).fatal){ //It's a fatal execution report
         const constructedError = new Error(err.message); //Assumes err is an errorReport made via errorReport() so message is of type string

@@ -14,11 +14,11 @@ interface EmailAssociationRequest {
 }
 
 const checkIfEnabled = () => {
-    
-    if (builtInEnvVariables.runningInEmulator){
+
+    if (builtInEnvVariables.runningInEmulator) {
         logger.info("__TEST__ function has been called!")
         return;
-    } 
+    }
     logger.error("Someone attempted to access a test function even though testing is currently disabled.")
     throw errorReport('This function is only available for testing - it is disabled in production.');
 }
@@ -49,7 +49,7 @@ export const test_associateUserWithDomain = functions.https.onCall(
 
 
 
- export const test_unverifyUserEmail = functions.https.onCall(
+export const test_unverifyUserEmail = functions.https.onCall(
     async (username: string, _) => {
         try {
             if (!username) throw errorReport("Need username.");
@@ -57,6 +57,38 @@ export const test_associateUserWithDomain = functions.https.onCall(
             if (!uidFromUsername) throw errorReport("Could not get id.");
 
             admin.auth().updateUser(uidFromUsername, { emailVerified: false })
+            return successReport()
+        } catch (err) {
+            return handleError(err)
+        }
+    });
+
+export const test_unverifyUserEmailViaEmail = functions.https.onCall(
+    async (email: string, _) => {
+        try {
+            if (!email) throw errorReport("Need email.");
+            const user = await admin.auth().getUserByEmail(email)
+            if (!user) throw errorReport("Could not get id.");
+
+            admin.auth().updateUser(user.uid, { emailVerified: false })
+            return successReport()
+        } catch (err) {
+            return handleError(err)
+        }
+    });
+
+
+//Max mage size: 1k users
+//Once emit gets more users this will no longer be reliable without pagination
+export const test_checkIfEveryVerifiedUserHasDoc = functions.https.onCall(
+    async (__, _) => {
+        try {
+            const users = (await admin.auth().listUsers()).users.filter(u => u.emailVerified)
+            const notActualVerified = []
+            for (const user of users) {
+                if (!(await extraUserInfoCollection.doc(user.uid).get()).exists) notActualVerified.push(user.email)
+            }
+            console.log(notActualVerified)
             return successReport()
         } catch (err) {
             return handleError(err)
