@@ -4,21 +4,23 @@ import { UserRecord } from 'firebase-functions/lib/providers/auth';
 import { URL, URLSearchParams } from 'url';
 import { UserSnippet } from './accountManagementFunctions';
 import { sendEmailFromCustomDomain } from './utils/emails';
+import { envVariables } from './utils/env/envVariables';
+import { getDomainFromEmail, hashOrgoNameForFirestore } from './utils/strings';
 import { errorReport, handleError, successReport } from './utils/utilities';
 import admin = require('firebase-admin');
-import { builtInEnvVariables, envVariables } from './utils/env/envVariables';
-import { getDomainFromEmail, hashOrgoNameForFirestore } from './utils/strings';
 
 const firestore = admin.firestore()
 const database = admin.database()
+
+
 const emailVerificationEmailHost = envVariables.emailVerification.email_host
 const emailVerificationEmailAddress = envVariables.emailVerification.email_address;
 const emailVerificationEmailPassword = envVariables.emailVerification.email_password;
 const emailVerificationEmailUseTLS = envVariables.emailVerification.use_tls;
 const emailVerificationEmailPort = envVariables.emailVerification.email_port;
 const emailVerificationEmailFollowURL = envVariables.emailVerification.follow_url;
-const funcLocation = envVariables.emailVerification.functions_location;
-const projectId = builtInEnvVariables.projectId
+const isProd = envVariables.emailVerification.is_prod
+const handlerUrl = envVariables.emailVerification.handler_url;
 
 interface userVerificationInfo {
     verificationLinkParams: string,
@@ -47,6 +49,7 @@ export const sendVerificationEmail = functions.https.onCall(async (_, context) =
 })
 
 const _sendVerificationEmail = async (user: UserRecord) => {
+    if (!isProd) throw errorReport("This is a dev server; use the shell commands to verify instead")
     //Basic checks
     if (!user.email) return
     if (!getDomainFromEmail(user.email)) throw errorReport("We can't get an email associated with your account!")
@@ -61,8 +64,7 @@ const _sendVerificationEmail = async (user: UserRecord) => {
     };
     const link = await admin.auth().generateEmailVerificationLink(user.email, actionCodeSettings);
     const linkParams = new URL(link).searchParams;
-    const newURL = `https://${funcLocation}-${projectId}.cloudfunctions.net/verifyEmail`
-    const newURLFull = new URL(newURL)
+    const newURLFull = new URL(handlerUrl)
     for (const [key, val] of linkParams.entries()) {
         newURLFull.searchParams.set(key, val)
     }
@@ -97,6 +99,8 @@ const _sendVerificationEmail = async (user: UserRecord) => {
 }
 
 export const verifyEmail = functions.https.onRequest(async (req, res) => {
+    //Since the website that calls this is a React project...
+    res.set('Access-Control-Allow-Origin', "*"); //TODO: Should probably make this more secure later
     try {
         //Generating the id that would correspond to the doc in firestore
         const { mode, oobCode, apiKey } = req.query;
@@ -110,12 +114,18 @@ export const verifyEmail = functions.https.onRequest(async (req, res) => {
             .where("verificationLinkParams", "==", codifyLinkSearchParams(params))
             .get();
         const verificationDoc = queryRef.docs[0] //Assumes only one doc will be in the query
-        if (!verificationDoc) return res.sendStatus(403).end("No associated verification data.");
+        if (!verificationDoc) {
+            res.status(400).send("No associated verification data.");
+            return
+        }
         const docData = verificationDoc.data() as userVerificationInfo
 
         //Update backend and return
         const domain = getDomainFromEmail(docData.emailAssociatedWithLink)
-        if (!domain) return res.sendStatus(403).end("Could not get domain from email.");
+        if (!domain) {
+            res.status(400).send("Could not get domain from email.");
+            return
+        }
         admin.auth().updateUser(verificationDoc.id, { emailVerified: true })
         const valueToSet: extraUserInfoEmailOnly = { 
             lastVerifiedEmailDomain: domain,
@@ -125,7 +135,7 @@ export const verifyEmail = functions.https.onRequest(async (req, res) => {
         await verificationDoc.ref.delete()
         res.status(200).send("Email verified! Restart the app and it'll be applied :)")
     } catch (err) {
-        res.sendStatus(500).end();
+        res.status(500).send();
     }
 });
 

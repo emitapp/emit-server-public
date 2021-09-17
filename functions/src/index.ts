@@ -37,3 +37,4 @@ export * from './userInviting';
 // export * from './devFunctions/dbMgmtFunctions/notificationManagement';
 // export * from './devFunctions/testFunctions/emailAndDomains';
 // export * from './devFunctions/testFunctions/notificationTests';
+// export * from './devFunctions/dbMgmtFunctions/groupManagement';

@@ -41,13 +41,14 @@ interface EnvVariableTemplateInterface {
         email_password: string
     },
     emailVerification: {
+        is_prod: boolean
         email_host: string
         email_port: number
         use_tls: boolean
         email_address: string
         email_password: string
         follow_url: string //To prevent a auth/unauthorized-continue-uri error, whitelist this domain in your console
-        functions_location: string
+        handler_url: string
     }
 }
 
@@ -87,13 +88,14 @@ export const envVariables : EnvVariableTemplateInterface = {
         email_password: "",
     },
     emailVerification: {
+        is_prod: false,
         email_host: "",
         email_port: 0,
         use_tls: false,
         email_address: "",
         email_password: "",
         follow_url: "",
-        functions_location: ""
+        handler_url: ""
     }
 }
 
