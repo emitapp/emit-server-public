@@ -115,7 +115,7 @@ export const verifyEmail = functions.https.onRequest(async (req, res) => {
             .get();
         const verificationDoc = queryRef.docs[0] //Assumes only one doc will be in the query
         if (!verificationDoc) {
-            res.status(400).send("No associated verification data.");
+            res.status(400).send("We couldn't find this request! Either you are already verified, or this request is invalid.");
             return
         }
         const docData = verificationDoc.data() as userVerificationInfo

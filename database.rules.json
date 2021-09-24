@@ -98,7 +98,7 @@
           ".write": "auth.uid == $uid",
           ".validate": "newData.hasChild('name') || !newData.exists()",
           "name":{
-            ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 100)"
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 200)"
           },
           "geolocation":{
             ".validate": "newData.hasChildren(['latitude', 'longitude']) || !newData.exists()",
