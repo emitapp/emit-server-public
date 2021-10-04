@@ -245,8 +245,7 @@ export const createPublicFlareHelper = async (data: PublicFlareCreationRequest, 
     oldCancellationTaskPath = flarePrivateDoc.data()?.cancellationTaskPath
   }
 
-  const flareUid = isEditing ? data.originalFlareUid : specificPublicFlaresCol.doc().id
-
+  const flareUid =  isEditing ? data.originalFlareUid : specificPublicFlaresCol.doc().id
   if (!flareUid) throw errorReport(`Invalid FlareUid`)
 
   const ownerSnippetSnapshot = await database.ref(`userSnippets/${data.ownerUid}`).once('value');
@@ -315,7 +314,6 @@ export const createPublicFlareHelper = async (data: PublicFlareCreationRequest, 
   }
 
   // If flare is recurring, enqueue the createPublicFlareCloudTask
-  // This should only be done if the flare is being created for the first time.
   if (data.recurringDays?.length > 0 && !isEditing) {
 
     // enqueue next task
@@ -324,9 +322,9 @@ export const createPublicFlareHelper = async (data: PublicFlareCreationRequest, 
     const executionCloudTaskName = cloudTaskResponse.name
     // maintain unique identifier for recurring flares as the original flare id, as the flare
     // id changes each time this function is called
-    rtdbAdditions[`recurringFlares/${data.ownerUid}/${flareUid}`] = {
+    rtdbAdditions[`recurringFlares/${data.ownerUid}/${data.originalFlareUid}`] = {
       ...shortenedFlareObject,
-      originalFlareUid: flareUid,
+      originalFlareUid: data.originalFlareUid,
       frequency: data.recurringDays.join("/"),
       cloudTaskName: executionCloudTaskName
     }
