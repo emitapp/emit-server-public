@@ -13,7 +13,8 @@ import { HttpsError} from "firebase-functions/lib/providers/https";
 export enum ExecutionStatus {
     OK = "successful",
     INVALID = "invalid state",
-    LEASE_TAKEN = "lease taken"
+    LEASE_TAKEN = "lease taken",
+    NOT_SUPPORTED = "not supported"
 }
 
 type ErroneousStatus = Exclude<ExecutionStatus, ExecutionStatus.OK>;

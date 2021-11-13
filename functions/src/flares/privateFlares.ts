@@ -39,8 +39,8 @@ interface BroadcastCreationRequest {
     friendsToRemove: string[],
     groupsToRemove: string[]
 }
-interface DeletionRequest {
-    uid: string,
+interface PrivateFlareDeletionRequest {
+    flareUid: string,
     ownerUid: string
 }
 
@@ -393,7 +393,7 @@ const editPrivateFlare = async (data: BroadcastCreationRequest): Promise<string 
 }
 
 export const deleteBroadcast = functions.https.onCall(
-    async (data: DeletionRequest, context) => {
+    async (data: PrivateFlareDeletionRequest, context) => {
         try {
             if (!context.auth) {
                 throw errorReport("Authentication Needed")
@@ -404,17 +404,17 @@ export const deleteBroadcast = functions.https.onCall(
             }
 
             const privateBroadcastSnapshot = await database
-                .ref(`activeBroadcasts/${data.ownerUid}/private/${data.uid}`)
+                .ref(`activeBroadcasts/${data.ownerUid}/private/${data.flareUid}`)
                 .once('value');
             const publicBroadcastSnapshot = await database
-                .ref(`activeBroadcasts/${data.ownerUid}/public/${data.uid}`)
+                .ref(`activeBroadcasts/${data.ownerUid}/public/${data.flareUid}`)
                 .once('value');
             if (!privateBroadcastSnapshot.exists() || !publicBroadcastSnapshot.exists()) {
                 throw errorReport(`Invalid broadcast uid`);
             }
 
             await runTask(privateBroadcastSnapshot.val().cancellationTaskPath)
-            return successReport({ uid: data.uid })
+            return successReport({ uid: data.flareUid })
         } catch (err) {
             return handleError(err)
         }

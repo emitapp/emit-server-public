@@ -6,7 +6,7 @@ import { UserSnippet } from './accountManagementFunctions';
 import { sendEmailFromCustomDomain } from './utils/emails';
 import { envVariables } from './utils/env/envVariables';
 import { getDomainFromEmail, hashOrgoNameForFirestore } from './utils/strings';
-import { errorReport, handleError, successReport } from './utils/utilities';
+import { errorReport, ExecutionStatus, handleError, successReport } from './utils/utilities';
 import admin = require('firebase-admin');
 
 const firestore = admin.firestore()
@@ -30,7 +30,7 @@ interface userVerificationInfo {
 
 export interface extraUserInfoEmailOnly {
     lastVerifiedEmailDomain: string,
-    hashedDomain: string, 
+    hashedDomain: string,
 }
 
 const verificationCollection = firestore.collection('userEmailVerifications')
@@ -39,7 +39,12 @@ export const extraUserInfoCollection = firestore.collection('publicExtraUserInfo
 
 export const sendVerificationEmail = functions.https.onCall(async (_, context) => {
     try {
+
+        //Added due to Emit end-of-life
+        throw errorReport("This operation isn't supported anymore!", ExecutionStatus.NOT_SUPPORTED)
+
         if (!context.auth) throw errorReport("Authentication Required")
+        // @ts-ignore: Object is possibly 'undefined'
         const userRecord = await admin.auth().getUser(context.auth.uid);
         await _sendVerificationEmail(userRecord);
         return successReport("Verification Email Sent!")
@@ -127,7 +132,7 @@ export const verifyEmail = functions.https.onRequest(async (req, res) => {
             return
         }
         admin.auth().updateUser(verificationDoc.id, { emailVerified: true })
-        const valueToSet: extraUserInfoEmailOnly = { 
+        const valueToSet: extraUserInfoEmailOnly = {
             lastVerifiedEmailDomain: domain,
             hashedDomain: hashOrgoNameForFirestore(domain)
         }
